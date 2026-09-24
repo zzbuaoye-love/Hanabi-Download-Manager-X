@@ -18,9 +18,9 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('neonsf_bridge_');
     bridge = NeoNsfProcessBridge();
     final ready = await bridge.start();
-    expect(ready['protocolVersion'], 1);
-    expect(ready['name'], 'NeoNSFX');
-    expect(ready['version'], '0.1.0');
+    expect(ready['protocolVersion'], 2);
+    expect(ready['name'], 'NeoNSF');
+    expect(ready['version'], '1.0.0');
     expect(
       (ready['capabilities'] as Map?)?['multiRange'],
       isTrue,
@@ -130,7 +130,10 @@ void main() {
   });
 
   test('downloads a known large file with native parallel ranges', () async {
-    const size = 16 * 1024 * 1024;
+    // A 16 MiB localhost transfer finishes before the adaptive controller has
+    // enough samples to open another lane. Use the same 64 MiB threshold as
+    // the native smoke test so this assertion observes actual scale-up.
+    const size = 64 * 1024 * 1024;
     const taskId = 'neo-large-parallel';
     final output = path.join(tempDir.path, 'large.bin');
     final headers = bridge.events.firstWhere(
@@ -146,7 +149,9 @@ void main() {
       await bridge.enqueue(<String, dynamic>{
         'taskId': taskId,
         'url': server.baseUri
-            .resolve('download/normal/16m.bin?resource=neo-large')
+            .resolve(
+              'download/slow/64m.bin?resource=neo-large&chunkBytes=65536&delayMs=5',
+            )
             .toString(),
         'filePath': output,
         'expectedSize': size,
@@ -158,8 +163,10 @@ void main() {
 
     final headerEvent = await headers.timeout(const Duration(seconds: 5));
     expect(headerEvent['transferMode'], 'parallel_range');
-    expect((headerEvent['connectionCount'] as num).toInt(), 4);
-    final terminalEvent = await terminal.timeout(const Duration(seconds: 20));
+    // NeoNSF v2 starts conservatively and scales up to the requested cap.
+    expect((headerEvent['connectionCount'] as num).toInt(), 1);
+    expect((headerEvent['maxConnectionCount'] as num).toInt(), 4);
+    final terminalEvent = await terminal.timeout(const Duration(seconds: 40));
     expect(
       terminalEvent['type'],
       'completed',
@@ -171,7 +178,7 @@ void main() {
       DownloadTestPattern.bytes(0, size),
     );
     final stats = await _serverStats(server.baseUri);
-    expect((stats['rangeRequests'] as num).toInt(), greaterThanOrEqualTo(4));
+    expect((stats['rangeRequests'] as num).toInt(), greaterThan(1));
     expect((stats['maxActiveRequests'] as num).toInt(), greaterThan(1));
   });
 
@@ -334,7 +341,7 @@ void main() {
       (event) =>
           event['type'] == 'retrying' &&
           event['taskId'] == taskId &&
-          event['error'].toString().contains('RESUME_VALIDATOR_CHANGED'),
+          event['error'].toString().contains('RESUME_STATE_INVALID'),
     );
     final terminal = bridge.events.firstWhere(
       (event) =>

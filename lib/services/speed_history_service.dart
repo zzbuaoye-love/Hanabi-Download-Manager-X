@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// 速度历史记录服务 — 为每个下载任务维护速度曲线数据，支持持久化
@@ -23,6 +24,15 @@ class SpeedHistoryService {
   bool _loaded = false;
   bool _persistenceEnabled = true;
 
+  static bool get _hasServicesBinding {
+    try {
+      ServicesBinding.instance;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void setPersistenceEnabled(bool enabled) {
     _persistenceEnabled = enabled;
   }
@@ -39,6 +49,7 @@ class SpeedHistoryService {
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
+    if (!_hasServicesBinding) return;
     try {
       final path = await _getFilePath();
       final file = File(path);
@@ -62,7 +73,7 @@ class SpeedHistoryService {
   /// 保存到磁盘（节流：不会每次 record 都写）
   int _saveCounter = 0;
   Future<void> _saveToDisk() async {
-    if (!_persistenceEnabled) return;
+    if (!_persistenceEnabled || !_hasServicesBinding) return;
     // 每 10 次 record 保存一次，减少 IO
     _saveCounter++;
     if (_saveCounter < 10) return;
@@ -72,7 +83,7 @@ class SpeedHistoryService {
 
   /// 强制保存到磁盘
   Future<void> forceSave() async {
-    if (!_persistenceEnabled) return;
+    if (!_persistenceEnabled || !_hasServicesBinding) return;
     try {
       final path = await _getFilePath();
       final Map<String, List<double>> data = {};

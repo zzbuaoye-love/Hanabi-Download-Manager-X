@@ -103,7 +103,7 @@ class DownloadTask {
         'hostConcurrencyCap': hostConcurrencyCap,
         'hostConcurrencyReason': hostConcurrencyReason,
         'kernelId': kernelId,
-        'downloadCore': kernelId == neoNsfKernelId ? 'NeoNSFX' : 'NSFX',
+        'downloadCore': kernelId == neoNsfKernelId ? 'NeoNSF' : 'NSFX',
         'segments': segments.map((s) => s.toJson()).toList(),
       };
 

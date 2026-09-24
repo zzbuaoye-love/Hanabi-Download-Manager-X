@@ -19,6 +19,29 @@ class NsfxHttpServer {
   final Map<String, DateTime> _recentPopupSignatures = {};
   static const Duration _popupDedupWindow = Duration(seconds: 4);
 
+  // 队列进人时的进程内信号。HTTP 服务器和主窗口在同一个 Dart 进程里，
+  // 所以主窗口不必靠轮询才能发现新请求——轮询退化成兜底，即使降到
+  // 极致精简模式的低频档，浏览器点下载依然是秒开弹窗。
+  static final Set<void Function()> _pendingPopupListeners = {};
+
+  static void addPendingPopupListener(void Function() listener) {
+    _pendingPopupListeners.add(listener);
+  }
+
+  static void removePendingPopupListener(void Function() listener) {
+    _pendingPopupListeners.remove(listener);
+  }
+
+  static void _notifyPendingPopupQueued() {
+    for (final listener in _pendingPopupListeners.toList(growable: false)) {
+      try {
+        listener();
+      } catch (_) {
+        // 单个监听者出错不能影响 HTTP 响应。
+      }
+    }
+  }
+
   // 在线用户统计
   final Map<String, DateTime> _activeSessions = {};
   final Map<String, Map<String, dynamic>> _deviceFingerprints =
@@ -324,6 +347,7 @@ class NsfxHttpServer {
       'message': 'Queued for main-window confirmation',
       'handoff_action': 'show_popup',
     });
+    _notifyPendingPopupQueued();
   }
 
   Future<void> _handlePendingPopup(HttpRequest request) async {

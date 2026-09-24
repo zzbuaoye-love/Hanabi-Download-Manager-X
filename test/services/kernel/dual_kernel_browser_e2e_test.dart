@@ -15,7 +15,7 @@ void main() {
   final enabled = Platform.environment['HDMX_RUN_DUAL_KERNEL_E2E'] == '1';
 
   test(
-    'browser API routes Auto tasks to NeoNSFX and honors explicit NSFX',
+    'browser API routes Auto tasks to NeoNSF and honors explicit NSFX',
     () async {
       HttpOverrides.global = null;
       final home = Platform.environment['USERPROFILE'];

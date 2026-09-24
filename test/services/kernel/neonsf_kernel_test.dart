@@ -171,6 +171,7 @@ class _FakeNeoNsfBridge extends NeoNsfProcessBridge {
   final StreamController<Map<String, dynamic>> _controller =
       StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final List<Map<String, dynamic>> enqueuedPayloads = <Map<String, dynamic>>[];
+  final List<Map<String, int?>> configureCalls = <Map<String, int?>>[];
   bool _running = false;
 
   void emit(Map<String, dynamic> event) => _controller.add(event);
@@ -186,7 +187,19 @@ class _FakeNeoNsfBridge extends NeoNsfProcessBridge {
     Duration timeout = const Duration(seconds: 8),
   }) async {
     _running = true;
-    return <String, dynamic>{'protocolVersion': 1, 'ready': true};
+    return <String, dynamic>{'protocolVersion': 2, 'ready': true};
+  }
+
+  @override
+  Future<bool> configure({
+    int? maxConcurrentTransfers,
+    int? maxBytesPerSecond,
+  }) async {
+    configureCalls.add(<String, int?>{
+      'maxConcurrentTransfers': maxConcurrentTransfers,
+      'maxBytesPerSecond': maxBytesPerSecond,
+    });
+    return true;
   }
 
   @override

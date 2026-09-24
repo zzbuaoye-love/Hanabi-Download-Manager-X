@@ -8,11 +8,48 @@
     <RootNamespace>Hanabi.NeoNSF</RootNamespace>
     <PublishAot>true</PublishAot>
     <SelfContained>true</SelfContained>
-    <InvariantGlobalization>false</InvariantGlobalization>
     <StripSymbols>true</StripSymbols>
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0.0</FileVersion>
-    <Product>Hanabi NeoNSFX Download Engine</Product>
+    <!-- Required by the LibraryImport source generator used for FSCTL_SET_SPARSE. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <Product>Hanabi NeoNSF Download Engine</Product>
     <Company>ZZBuAoYe</Company>
+  </PropertyGroup>
+
+  <!--
+    Globalization stays ON. InvariantGlobalization would drop ICU and shrink the
+    native image, but it also makes System.Globalization.IdnMapping throw, which
+    breaks any URL with a non-ASCII host. Correctness for CJK users wins.
+    Every culture-sensitive call in this project passes CultureInfo.InvariantCulture
+    explicitly instead.
+  -->
+  <PropertyGroup>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Runtime feature switches. HttpActivityPropagationSupport and EventSourceSupport
+    remove the DiagnosticSource/EventSource instrumentation that SocketsHttpHandler
+    otherwise evaluates on every single request.
+    UseSystemResourceKeys is deliberately NOT set: it replaces exception messages
+    with opaque resource keys, and this engine forwards Exception.Message straight
+    to the UI as the user-visible failure reason.
+  -->
+  <PropertyGroup>
+    <EventSourceSupport>false</EventSourceSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <NullabilityInfoContextSupport>false</NullabilityInfoContextSupport>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <AutoreleasePoolSupport>false</AutoreleasePoolSupport>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
 </Project>

@@ -26,6 +26,11 @@ class NeoNsfKernel implements KernelInterface {
   final Map<String, Map<String, String>> _resumeValidators =
       <String, Map<String, String>>{};
   final Set<String> _detachingTasks = <String>{};
+
+  /// Tasks that were mid-flight when the sidecar died, replayed once it is back.
+  final Set<String> _interruptedTasks = <String>{};
+
+  static const int _supportedProtocolVersion = 2;
   final StreamController<DownloadTask> _progressController =
       StreamController<DownloadTask>.broadcast(sync: true);
   final StreamController<DownloadTask> _completeController =
@@ -94,9 +99,13 @@ class NeoNsfKernel implements KernelInterface {
         );
       _eventSubscription = _bridge.events.listen(_handleEvent);
       final ready = await _bridge.start();
-      if (ready['protocolVersion'] != 1) {
-        throw StateError('Unsupported NeoNSF protocol version.');
+      if (ready['protocolVersion'] != _supportedProtocolVersion) {
+        throw StateError(
+          'Unsupported NeoNSF protocol version '
+          '${ready['protocolVersion']} (expected $_supportedProtocolVersion).',
+        );
       }
+      await _pushEngineConfig();
       _statisticsTimer = Timer.periodic(
         const Duration(seconds: 1),
         (_) => _emitStatistics(),
@@ -155,10 +164,10 @@ class NeoNsfKernel implements KernelInterface {
     int? expectedSizeHint,
   }) async {
     if (!_isRunning) {
-      throw StateError('NeoNSFX is not running. Did it crash?');
+      throw StateError('NeoNSF is not running. Did it crash?');
     }
     if (!canAccept(url: url, expectedSizeHint: expectedSizeHint)) {
-      throw StateError('NeoNSFX cannot accept this URL.');
+      throw StateError('NeoNSF cannot accept this URL.');
     }
     final targetDir =
         (saveDir?.trim().isNotEmpty ?? false) ? saveDir!.trim() : _downloadDir;
@@ -175,7 +184,7 @@ class NeoNsfKernel implements KernelInterface {
       threadCount: 1,
       kernelId: DownloadTask.neoNsfKernelId,
       effectiveHttpVersionPolicy: _config.httpVersionPolicy,
-      resumeDecisionLabel: 'NeoNSFX Native Planner',
+      resumeDecisionLabel: 'NeoNSF Native Planner',
       resumeDecisionReason:
           'Native planner will choose direct or parallel range transfer.',
     );
@@ -231,7 +240,9 @@ class NeoNsfKernel implements KernelInterface {
       'expectedSize': task.totalSize > 0 ? task.totalSize : null,
       'headers': requestHeaders,
       'maxRetries': 3,
+      'maxSegmentRetries': 5,
       'connectionTimeoutSeconds': _config.connectionTimeout,
+      'headerTimeoutSeconds': _config.connectionTimeout.clamp(3, 120),
       'readTimeoutSeconds': _config.readTimeout,
       'maxConnections': min(
         _config.threads.clamp(1, 16),
@@ -278,11 +289,31 @@ class NeoNsfKernel implements KernelInterface {
   Future<bool> resumeDownload(String taskId) async {
     final task = _tasks[taskId];
     if (task == null || task.status == DownloadStatus.completed) return false;
-    var resumed = await _bridge.resume(taskId);
-    if (!resumed) {
-      resumed = await _enqueueTask(task);
+
+    var resumed = false;
+    try {
+      resumed = await _bridge.resume(taskId);
+    } catch (error) {
+      _logger.warning('NeoNSF', 'Resume command failed for $taskId: $error');
     }
+
+    if (!resumed) {
+      // The engine forgets terminal tasks, and it forgets everything across a
+      // restart, so re-registering from the persisted record is the normal path
+      // rather than an error case.
+      try {
+        resumed = await _enqueueTask(task);
+      } catch (error) {
+        _logger.warning('NeoNSF', 'Re-enqueue failed for $taskId: $error');
+        task.status = DownloadStatus.failed;
+        task.errorMessage = error.toString();
+        _progressController.add(task);
+        return false;
+      }
+    }
+
     if (resumed) {
+      _interruptedTasks.remove(taskId);
       task.status = DownloadStatus.pending;
       task.errorMessage = null;
       _progressController.add(task);
@@ -339,10 +370,14 @@ class NeoNsfKernel implements KernelInterface {
       try {
         await completer.future.timeout(const Duration(seconds: 5));
       } on TimeoutException {
+        // The command was accepted but the state change never landed, so the task
+        // is very likely still running. Reporting success here made the UI show a
+        // paused task that kept downloading.
         _logger.warning(
           'NeoNSF',
           '$eventType acknowledgement timed out: $taskId',
         );
+        return false;
       }
       return true;
     } finally {
@@ -440,7 +475,23 @@ class NeoNsfKernel implements KernelInterface {
   @override
   Future<bool> setConfig(DownloadConfig config) async {
     _config = config;
+    await _pushEngineConfig();
     return true;
+  }
+
+  /// Mirrors the process-wide knobs into the sidecar. Per-task settings travel with
+  /// the enqueue payload instead.
+  Future<void> _pushEngineConfig() async {
+    if (!_bridge.isRunning) return;
+    try {
+      await _bridge.configure(
+        maxConcurrentTransfers: _config.maxConcurrentTasks.clamp(1, 32),
+        maxBytesPerSecond:
+            _config.globalSpeedLimit < 0 ? 0 : _config.globalSpeedLimit,
+      );
+    } catch (error) {
+      _logger.warning('NeoNSF', 'Failed to push NeoNSF engine config: $error');
+    }
   }
 
   @override
@@ -501,12 +552,19 @@ class NeoNsfKernel implements KernelInterface {
     final taskId = event['taskId']?.toString();
     final task = taskId == null ? null : _tasks[taskId];
     if (task == null) {
-      if (event['type'] == 'processExited') {
-        _handleProcessExit(event);
+      switch (event['type']) {
+        case 'processExited':
+          _handleProcessExit(event);
+        case 'processRestarted':
+          unawaited(_rehydrateAfterRestart());
       }
       return;
     }
     if (event['type'] == 'cancelled' && _detachingTasks.remove(taskId)) {
+      return;
+    }
+    if (event['type'] == 'progress' && task.status == DownloadStatus.paused) {
+      // A sample already in flight when the pause landed must not un-pause the UI.
       return;
     }
 
@@ -524,11 +582,15 @@ class NeoNsfKernel implements KernelInterface {
             (event['connectionCount'] as num?)?.toInt() ?? task.threadCount;
         final transferMode = event['transferMode']?.toString();
         if (transferMode == 'parallel_range') {
-          task.resumeDecisionLabel = 'NeoNSFX Parallel Range';
+          final ceiling = (event['maxConnectionCount'] as num?)?.toInt() ??
+              task.threadCount;
+          task.resumeDecisionLabel = 'NeoNSF Parallel Range';
+          // The engine starts at one lane and escalates only while extra
+          // connections measurably help, so this is a ceiling, not a count.
           task.resumeDecisionReason =
-              'Native planner selected ${task.threadCount} concurrent ranges.';
+              'Native planner will scale up to $ceiling concurrent ranges.';
         } else if (transferMode == 'direct') {
-          task.resumeDecisionLabel = 'NeoNSFX Direct';
+          task.resumeDecisionLabel = 'NeoNSF Direct';
           task.resumeDecisionReason =
               'Native planner selected a single streaming connection.';
         }
@@ -554,6 +616,10 @@ class NeoNsfKernel implements KernelInterface {
         task.speed = (event['instantBps'] as num?)?.toDouble() ?? 0;
         task.averageSpeed =
             (event['averageBps'] as num?)?.toDouble() ?? task.averageSpeed;
+        // Lane count is adaptive, so it has to track the live value rather than
+        // whatever the planner announced at the start.
+        task.threadCount =
+            (event['connectionCount'] as num?)?.toInt() ?? task.threadCount;
         task.peakSpeed = max(task.peakSpeed, task.speed);
         task.progress =
             task.totalSize > 0 ? task.downloadedSize * 100 / task.totalSize : 0;
@@ -595,14 +661,51 @@ class NeoNsfKernel implements KernelInterface {
   }
 
   void _handleProcessExit(Map<String, dynamic> event) {
+    final willRestart = event['willRestart'] == true;
     for (final task in _tasks.values) {
       if (task.status == DownloadStatus.downloading ||
           task.status == DownloadStatus.pending) {
+        if (willRestart) {
+          _interruptedTasks.add(task.id);
+        }
         task.status = DownloadStatus.paused;
         task.speed = 0;
         task.eta = 0;
-        task.errorMessage =
-            'NeoNSF process exited (${event['exitCode'] ?? 'unknown'}).';
+        task.errorMessage = willRestart
+            ? null
+            : 'NeoNSF process exited (${event['exitCode'] ?? 'unknown'}).';
+        _progressController.add(task);
+      }
+    }
+    _saveInBackground();
+  }
+
+  /// Replays the tasks that were mid-flight when the sidecar died. Their bytes and
+  /// checkpoints are still on disk, so each one picks up where it stopped.
+  Future<void> _rehydrateAfterRestart() async {
+    if (_interruptedTasks.isEmpty) {
+      await _pushEngineConfig();
+      return;
+    }
+    final pending = _interruptedTasks.toList(growable: false);
+    _interruptedTasks.clear();
+    await _pushEngineConfig();
+
+    for (final taskId in pending) {
+      final task = _tasks[taskId];
+      if (task == null || task.status == DownloadStatus.completed) continue;
+      try {
+        await _enqueueTask(task);
+        task.status = DownloadStatus.pending;
+        task.errorMessage = null;
+        _progressController.add(task);
+      } catch (error) {
+        _logger.warning(
+          'NeoNSF',
+          'Failed to restore $taskId after a sidecar restart: $error',
+        );
+        task.status = DownloadStatus.paused;
+        task.errorMessage = error.toString();
         _progressController.add(task);
       }
     }

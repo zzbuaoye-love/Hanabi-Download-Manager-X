@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../utils/constants.dart';
 import '../app_logger_service.dart';
+import '../app_power_mode_service.dart';
 import '../client_config_service.dart';
 import 'kernel_interface.dart';
 import 'neonsf/neonsf_kernel.dart';
@@ -12,7 +13,7 @@ import 'next/nsfx_kernel.dart';
 /// Owns both built-in engines and routes every task back to its original owner.
 ///
 /// NSFX is always the stable control plane and browser-bridge host. Auto routes
-/// new HTTP tasks through NeoNSFX when its native runtime can accept them and
+/// new HTTP tasks through NeoNSF when its native runtime can accept them and
 /// falls back to NSFX only before the native task has been accepted.
 class KernelManager extends ChangeNotifier implements KernelInterface {
   static String get neoNsfxVersion => AppConstants.neoKernelVersion;
@@ -22,6 +23,7 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
 
   final AppLoggerService _logger = AppLoggerService();
   final ClientConfigService _clientConfig = ClientConfigService();
+  final AppPowerModeService _powerMode = AppPowerModeService();
   final Map<String, String> _taskOwners = <String, String>{};
 
   final StreamController<DownloadTask> _progressController =
@@ -129,16 +131,15 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
         if (!neoStarted && isNeoNsfSelected) {
           _logger.warning(
             'KernelRouter',
-            'NeoNSFX is selected but unavailable.',
+            'NeoNSF is selected but unavailable.',
           );
         }
       }
 
       await _refreshTaskOwners();
-      _statisticsTimer = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => unawaited(_emitCombinedStatistics()),
-      );
+      _powerMode.removeListener(_handlePowerModeChanged);
+      _powerMode.addListener(_handlePowerModeChanged);
+      _restartStatisticsTimer();
       _startupProgress = 1;
       _startupStatus = 'Download engines ready';
       return true;
@@ -220,7 +221,7 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
     try {
       final started = await neoNsf.start();
       if (!started) {
-        _neoNsfStartupError = 'Native NeoNSFX sidecar failed its handshake.';
+        _neoNsfStartupError = 'Native NeoNSF sidecar failed its handshake.';
         return false;
       }
 
@@ -236,7 +237,7 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
       return true;
     } catch (error) {
       _neoNsfStartupError = error.toString();
-      _logger.warning('KernelRouter', 'NeoNSFX startup failed: $error');
+      _logger.warning('KernelRouter', 'NeoNSF startup failed: $error');
       return false;
     } finally {
       if (!_disposed) notifyListeners();
@@ -273,6 +274,7 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
 
   @override
   Future<void> stop() async {
+    _powerMode.removeListener(_handlePowerModeChanged);
     _statisticsTimer?.cancel();
     _statisticsTimer = null;
     _selectionNotifyTimer?.cancel();
@@ -351,14 +353,14 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
       if (isNeoNsfSelected) {
         if (!neoAvailable) {
           throw StateError(
-              'NeoNSFX was explicitly selected but is not available. Startup Error: $_neoNsfStartupError');
+              'NeoNSF was explicitly selected but is not available. Startup Error: $_neoNsfStartupError');
         }
         throw StateError(
-            'NeoNSFX was explicitly selected but did not accept the task for an unknown reason.');
+            'NeoNSF was explicitly selected but did not accept the task for an unknown reason.');
       }
       _logger.info(
         'KernelRouter',
-        'Auto could not use NeoNSFX before acceptance; using NSFX.',
+        'Auto could not use NeoNSF before acceptance; using NSFX.',
       );
     }
 
@@ -455,8 +457,39 @@ class KernelManager extends ChangeNotifier implements KernelInterface {
     );
   }
 
+  /// 统计只服务于界面上的速度曲线/状态页。窗口隐藏时把节奏放缓，
+  /// 极致精简模式直接停表——注意每次采样都要跨进程问一遍 NeoNSF 边车，
+  /// 这在没人看的时候是纯粹的浪费。
+  Duration? _resolveStatisticsInterval() {
+    return switch (_powerMode.mode) {
+      AppPowerMode.active => const Duration(seconds: 1),
+      AppPowerMode.background => const Duration(seconds: 10),
+      AppPowerMode.ultraLite => null,
+    };
+  }
+
+  void _restartStatisticsTimer() {
+    _statisticsTimer?.cancel();
+    _statisticsTimer = null;
+
+    final interval = _resolveStatisticsInterval();
+    if (interval == null) return;
+
+    _statisticsTimer = Timer.periodic(
+      interval,
+      (_) => unawaited(_emitCombinedStatistics()),
+    );
+  }
+
+  void _handlePowerModeChanged() {
+    if (_disposed || !isRunning) return;
+    _restartStatisticsTimer();
+  }
+
   Future<void> _emitCombinedStatistics() async {
     if (_statisticsEmissionInProgress || _statisticsController.isClosed) return;
+    // 没有订阅者时采样毫无意义，直接跳过。
+    if (!_statisticsController.hasListener) return;
     _statisticsEmissionInProgress = true;
     try {
       final statistics = await getStatistics();

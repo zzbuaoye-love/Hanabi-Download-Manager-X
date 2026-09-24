@@ -124,7 +124,10 @@ class NsfxProxyRuntime {
       Duration(seconds: 30);
   static const String _windowsInternetSettingsSubKey =
       r'Software\Microsoft\Windows\CurrentVersion\Internet Settings';
-  static const int _windowsSystemProxyObserverWaitTimeoutMs = 1000;
+  // Keep native waits short: the observer isolate loops synchronously, and
+  // each wait slice that returns to Dart is a VM interrupt point (needed for
+  // hot restart / Isolate.kill to work promptly).
+  static const int _windowsSystemProxyObserverWaitTimeoutMs = 250;
   static const String _observerMessageReady = 'ready';
   static const String _observerMessageChanged = 'changed';
   static const String _observerMessageStopped = 'stopped';
@@ -144,6 +147,11 @@ class NsfxProxyRuntime {
   static SendPort? _windowsSystemProxyObserverControlPort;
   static Future<void>? _windowsSystemProxyObserverStartFuture;
   static Completer<void>? _windowsSystemProxyObserverStopCompleter;
+
+  /// Manual-reset win32 event used to ask the observer isolate to stop. The
+  /// observer loop is synchronous and never returns to its event loop, so a
+  /// SendPort command cannot reach it; signaling this event can.
+  static int _windowsSystemProxyObserverStopEventAddress = 0;
 
   static void clearBadProxies() {
     _badProxyCache.clear();
@@ -197,6 +205,10 @@ class NsfxProxyRuntime {
         _windowsSystemProxyObserverStopCompleter ?? Completer<void>();
     _windowsSystemProxyObserverStopCompleter = completer;
     _windowsSystemProxyObserverControlPort?.send(_observerCommandStop);
+    final stopEventAddress = _windowsSystemProxyObserverStopEventAddress;
+    if (stopEventAddress != 0) {
+      SetEvent(HANDLE(Pointer.fromAddress(stopEventAddress)));
+    }
 
     Future<void>.delayed(const Duration(milliseconds: 1500), () {
       if (completer.isCompleted ||
@@ -576,9 +588,19 @@ class NsfxProxyRuntime {
       );
     });
 
+    final stopEventResult = CreateEvent(null, true, false, null);
+    final stopEventHandle = stopEventResult.value;
+    _windowsSystemProxyObserverStopEventAddress =
+        stopEventHandle.address == INVALID_HANDLE_VALUE.address
+            ? 0
+            : stopEventHandle.address;
+
     _windowsSystemProxyObserverIsolate = await Isolate.spawn(
       _windowsSystemProxyRegistryObserverMain,
-      events.sendPort,
+      <Object?>[
+        events.sendPort,
+        _windowsSystemProxyObserverStopEventAddress,
+      ],
       errorsAreFatal: false,
       onError: errors.sendPort,
       onExit: exit.sendPort,
@@ -617,6 +639,13 @@ class NsfxProxyRuntime {
     _windowsSystemProxyObserverControlPort = null;
     _windowsSystemProxyObserverIsolate = null;
     _windowsSystemProxyObserverStopCompleter = null;
+    if (_windowsSystemProxyObserverStopEventAddress != 0) {
+      CloseHandle(
+        HANDLE(
+            Pointer.fromAddress(_windowsSystemProxyObserverStopEventAddress)),
+      );
+      _windowsSystemProxyObserverStopEventAddress = 0;
+    }
     _windowsSystemProxyObserverEventsSub?.cancel();
     _windowsSystemProxyObserverErrorsSub?.cancel();
     _windowsSystemProxyObserverExitSub?.cancel();
@@ -1059,28 +1088,33 @@ class _BadProxyEntry {
   });
 }
 
-void _windowsSystemProxyRegistryObserverMain(SendPort eventsPort) {
+void _windowsSystemProxyRegistryObserverMain(List<Object?> args) {
+  final eventsPort = args[0] as SendPort;
+  final stopEventAddress =
+      args.length > 1 && args[1] is int ? args[1]! as int : 0;
+
   if (!Platform.isWindows) {
     eventsPort.send(const <Object?>[NsfxProxyRuntime._observerMessageStopped]);
     return;
   }
 
+  // The control port is kept for protocol compatibility with the main-isolate
+  // handler, but the loop below is synchronous and never services the event
+  // loop; the actual stop signal is the win32 event at [stopEventAddress].
   final controlPort = ReceivePort();
   eventsPort.send(<Object?>[
     NsfxProxyRuntime._observerMessageReady,
     controlPort.sendPort,
   ]);
 
-  var shouldStop = false;
-  final controlSub = controlPort.listen((message) {
-    if (message == NsfxProxyRuntime._observerCommandStop) {
-      shouldStop = true;
-    }
-  });
+  final HANDLE? stopEvent = stopEventAddress != 0
+      ? HANDLE(Pointer.fromAddress(stopEventAddress))
+      : null;
 
   final subKeyPtr =
       NsfxProxyRuntime._windowsInternetSettingsSubKey.toNativeUtf16();
   final keyPtr = calloc<IntPtr>();
+  final waitHandles = calloc<Pointer>(2);
   HKEY registryKey = HKEY(Pointer.fromAddress(0));
   HANDLE eventHandle = HANDLE(Pointer.fromAddress(0));
 
@@ -1112,7 +1146,11 @@ void _windowsSystemProxyRegistryObserverMain(SendPort eventsPort) {
       return;
     }
 
-    while (!shouldStop) {
+    var running = true;
+    while (running) {
+      // Arm one registry-change notification, then wait for it (or stop) in
+      // short slices. Every slice that returns to Dart is a loop back-edge
+      // where the VM can interrupt this isolate (hot restart, kill).
       final notifyResult = RegNotifyChangeKeyValue(
         registryKey,
         false,
@@ -1128,24 +1166,47 @@ void _windowsSystemProxyRegistryObserverMain(SendPort eventsPort) {
         break;
       }
 
-      final waitResult = WaitForSingleObject(
-        eventHandle,
-        NsfxProxyRuntime._windowsSystemProxyObserverWaitTimeoutMs,
-      );
-      if (waitResult.value == WAIT_OBJECT_0) {
-        eventsPort.send(
-          const <Object?>[NsfxProxyRuntime._observerMessageChanged],
-        );
-      } else if (waitResult.value != WAIT_TIMEOUT) {
-        eventsPort.send(<Object?>[
-          NsfxProxyRuntime._observerMessageError,
-          waitResult.value,
-        ]);
-        break;
+      while (true) {
+        WAIT_EVENT signal;
+        var registryChangedIndex = 0;
+        if (stopEvent != null) {
+          waitHandles[0] = stopEvent;
+          waitHandles[1] = eventHandle;
+          registryChangedIndex = 1;
+          signal = WaitForMultipleObjects(
+            2,
+            waitHandles,
+            false,
+            NsfxProxyRuntime._windowsSystemProxyObserverWaitTimeoutMs,
+          ).value;
+          if (signal == WAIT_OBJECT_0) {
+            running = false;
+            break;
+          }
+        } else {
+          signal = WaitForSingleObject(
+            eventHandle,
+            NsfxProxyRuntime._windowsSystemProxyObserverWaitTimeoutMs,
+          ).value;
+        }
+
+        if (signal == WAIT_OBJECT_0 + registryChangedIndex) {
+          eventsPort.send(
+            const <Object?>[NsfxProxyRuntime._observerMessageChanged],
+          );
+          break; // Re-arm the registry notification.
+        }
+        if (signal != WAIT_TIMEOUT) {
+          eventsPort.send(<Object?>[
+            NsfxProxyRuntime._observerMessageError,
+            signal,
+          ]);
+          running = false;
+          break;
+        }
       }
     }
   } finally {
-    controlSub.cancel();
     controlPort.close();
     if (eventHandle.address != 0) {
       CloseHandle(eventHandle);
@@ -1153,6 +1214,7 @@ void _windowsSystemProxyRegistryObserverMain(SendPort eventsPort) {
     if (registryKey.address != 0) {
       RegCloseKey(registryKey);
     }
+    calloc.free(waitHandles);
     calloc.free(keyPtr);
     calloc.free(subKeyPtr);
     eventsPort.send(const <Object?>[NsfxProxyRuntime._observerMessageStopped]);

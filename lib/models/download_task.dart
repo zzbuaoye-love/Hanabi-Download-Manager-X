@@ -93,6 +93,12 @@ class DownloadTask {
   int? hostConcurrencyCap;
   String? hostConcurrencyReason;
 
+  // 插件任务（BT / ED2K）的补充指标
+  String? statusDetail; // 例如「正在获取元数据」「12/40 源」
+  int? peerCount; // 已连接的 peer / 源数量
+  int? seederCount; // 做种者 / 已知源总数
+  double? uploadSpeed; // 字节/秒
+
   DownloadTask({
     required this.id,
     required this.url,
@@ -123,6 +129,10 @@ class DownloadTask {
     this.resumeDecisionReason,
     this.hostConcurrencyCap,
     this.hostConcurrencyReason,
+    this.statusDetail,
+    this.peerCount,
+    this.seederCount,
+    this.uploadSpeed,
   }) : createdAt = createdAt ?? DateTime.now();
 
   String get formattedFileSize {

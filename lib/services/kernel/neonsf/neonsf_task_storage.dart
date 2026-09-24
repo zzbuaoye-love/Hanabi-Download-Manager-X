@@ -45,10 +45,23 @@ class NeoNsfTaskStorage {
 
   Future<Map<String, DownloadTask>> loadTasks() async {
     await init();
-    if (!await _tasksFile.exists()) return <String, DownloadTask>{};
+    // A crash during a save can leave the payload only in the temporary file, so
+    // fall back to it before concluding there is nothing to restore.
+    for (final candidate in <File>[
+      _tasksFile,
+      File('${_tasksFile.path}.tmp'),
+    ]) {
+      if (!await candidate.exists()) continue;
+      final tasks = await _readTasks(candidate);
+      if (tasks != null) return tasks;
+    }
+    return <String, DownloadTask>{};
+  }
+
+  Future<Map<String, DownloadTask>?> _readTasks(File source) async {
     try {
-      final decoded = jsonDecode(await _tasksFile.readAsString());
-      if (decoded is! Map) return <String, DownloadTask>{};
+      final decoded = jsonDecode(await source.readAsString());
+      if (decoded is! Map) return null;
       final tasks = <String, DownloadTask>{};
       _requestHeaders.clear();
       _resumeValidators.clear();
@@ -84,7 +97,7 @@ class NeoNsfTaskStorage {
       }
       return tasks;
     } catch (_) {
-      return <String, DownloadTask>{};
+      return null;
     }
   }
 
@@ -109,9 +122,9 @@ class NeoNsfTaskStorage {
       await init();
       final temporary = File('${_tasksFile.path}.tmp');
       await temporary.writeAsString(jsonEncode(snapshot), flush: true);
-      if (await _tasksFile.exists()) {
-        await _tasksFile.delete();
-      }
+      // File.rename maps to MoveFileEx with MOVEFILE_REPLACE_EXISTING on Windows and
+      // to rename(2) elsewhere, so it replaces atomically. Deleting the target first
+      // (as this used to) opened a window where a crash lost every task.
       await temporary.rename(_tasksFile.path);
     });
     _writeQueue = operation.catchError((_) {});

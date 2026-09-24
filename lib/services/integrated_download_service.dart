@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/download_intent.dart';
 import '../models/download_task.dart';
+import 'app_power_mode_service.dart';
 import 'download_intent_dispatcher.dart';
 import 'kernel/kernel_manager.dart';
 import 'kernel/kernel_interface.dart' as kernel;
@@ -23,26 +24,37 @@ class IntegratedDownloadService extends ChangeNotifier {
   // 节流控制，避免 Windows 消息队列溢出
   // override notifyListeners() 从根源拦截所有通知，强制走节流
   DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
-  static const _minNotifyInterval = Duration(milliseconds: 500);
+  static const _foregroundNotifyInterval = Duration(milliseconds: 500);
+  static const _backgroundNotifyInterval = Duration(seconds: 3);
   bool _pendingNotify = false;
   Timer? _notifyTimer;
   bool _immediate = false; // 标记本次通知是否需要立即发送
+  // 极致精简模式下攒下的通知，唤醒时补发一次
+  bool _pendingWakeNotify = false;
 
   // 智能轮询：根据是否有活跃下载调整间隔
   bool _hasActiveDownloads = false;
-  bool _isBackgroundMode = false;
+  // 最近一次任务发生实质变化的时间。仅有「等待中」任务时用它判断是刚提交
+  // 还是长期卡住：BT / ED2K 等待源可能持续几十分钟，不该一直保持 2 秒轮询。
+  DateTime _lastTaskProgressAt = DateTime.now();
+  static const _pendingFastPollWindow = Duration(seconds: 60);
+  final _powerMode = AppPowerModeService();
+  AppPowerMode _currentPowerMode = AppPowerModeService().mode;
   bool _hasLoadedOnce = false;
   String? _lastAddTaskError;
   static const _activePollingInterval = Duration(seconds: 2);
   static const _backgroundActivePollingInterval = Duration(seconds: 5);
+  static const _ultraLiteActivePollingInterval = Duration(seconds: 30);
   static const _idlePollingInterval = Duration(seconds: 30);
   static const _backgroundIdlePollingInterval = Duration(seconds: 60);
+  static const _ultraLiteIdlePollingInterval = Duration(minutes: 10);
 
   // Stream 订阅
   StreamSubscription? _progressSubscription;
   StreamSubscription? _completeSubscription;
 
   IntegratedDownloadService() {
+    _powerMode.addListener(_handlePowerModeChanged);
     _startPolling();
     _subscribeToKernelStreams();
     unawaited(_pluginTaskService.initialize().then((_) async {
@@ -61,16 +73,37 @@ class IntegratedDownloadService extends ChangeNotifier {
 
   List<DownloadTask> get tasks => List.unmodifiable(_tasks);
   bool get hasLoadedOnce => _hasLoadedOnce;
-  bool get isBackgroundMode => _isBackgroundMode;
+  bool get isBackgroundMode => _currentPowerMode != AppPowerMode.active;
+  bool get isUltraLiteMode => _currentPowerMode == AppPowerMode.ultraLite;
   String? get lastAddTaskError => _lastAddTaskError;
 
-  void setBackgroundMode(bool isBackgroundMode) {
-    if (_isBackgroundMode == isBackgroundMode) {
+  /// 极致精简模式下不订阅进度流：进度事件唯一的用途就是驱动界面，而界面
+  /// 此刻并不可见。完成事件仍然保留，任务状态不会因此漂移。
+  bool get _suspendProgressStream =>
+      _currentPowerMode == AppPowerMode.ultraLite;
+
+  void _handlePowerModeChanged() {
+    final next = _powerMode.mode;
+    if (_currentPowerMode == next) return;
+
+    final wasSuspended = _suspendProgressStream;
+    _currentPowerMode = next;
+
+    if (wasSuspended != _suspendProgressStream) {
+      _subscribeToKernelStreams();
+    }
+    _scheduleNextPoll();
+
+    if (next != AppPowerMode.active) {
       return;
     }
 
-    _isBackgroundMode = isBackgroundMode;
-    _scheduleNextPoll();
+    // 唤醒：先把攒下的状态补给界面（首帧立刻是完整数据），再异步拉一次内核。
+    if (_pendingWakeNotify) {
+      _pendingWakeNotify = false;
+      notifyNow();
+    }
+    unawaited(_updateTasks());
   }
 
   DownloadTask? findDuplicateTask(String url) {
@@ -141,13 +174,20 @@ class IntegratedDownloadService extends ChangeNotifier {
       _appLogger.info('App', 'Subscribing to kernel streams...');
 
       // 监听进度更新
-      final progressStream = _kernelManager.onProgress;
-      _progressSubscription = progressStream.listen((task) {
-        _appLogger.debug('App',
-            'Stream progress: ${task.filename} - ${task.progress.toStringAsFixed(1)}%');
-        _handleStreamUpdate(task);
-      });
-      _appLogger.info('App', 'Subscribed to progress stream');
+      if (!_suspendProgressStream) {
+        final progressStream = _kernelManager.onProgress;
+        _progressSubscription = progressStream.listen((task) {
+          _appLogger.debug('App',
+              'Stream progress: ${task.filename} - ${task.progress.toStringAsFixed(1)}%');
+          _handleStreamUpdate(task);
+        });
+        _appLogger.info('App', 'Subscribed to progress stream');
+      } else {
+        _appLogger.info(
+          'App',
+          'Progress stream suspended (ultra lite mode)',
+        );
+      }
 
       // 监听完成事件
       final completeStream = _kernelManager.onComplete;
@@ -185,9 +225,13 @@ class IntegratedDownloadService extends ChangeNotifier {
         // 关键变化走即时通知
         _appLogger.debug('App',
             'Critical change detected: status=$isStatusChanged, size=$isSizeChanged');
+        _markTaskProgress();
         notifyNow();
       } else {
         // 普通进度更新走节流
+        if ((oldTask.progress - newTask.progress).abs() > 0.0001) {
+          _markTaskProgress();
+        }
         notifyListeners();
       }
     } else {
@@ -196,14 +240,12 @@ class IntegratedDownloadService extends ChangeNotifier {
       if (newTask.status == DownloadStatus.failed) {
         DownloadFailureStatsService().recordFailure(newTask);
       }
+      _markTaskProgress();
       notifyNow();
     }
 
     // 更新活跃下载状态
-    _hasActiveDownloads = _tasks.any((t) =>
-        t.status == DownloadStatus.downloading ||
-        t.status == DownloadStatus.merging ||
-        t.status == DownloadStatus.pending);
+    _hasActiveDownloads = _computeHasActiveDownloads();
   }
 
   void _logDiagnosticDecisionChanges(
@@ -253,8 +295,10 @@ class IntegratedDownloadService extends ChangeNotifier {
     _pollTimer?.cancel();
     final interval = _resolvePollingInterval();
     _pollTimer = Timer(interval, () async {
-      // 确保已订阅内核 Stream
-      if ((_progressSubscription == null || _completeSubscription == null) &&
+      // 确保已订阅内核 Stream（进度流在极致精简模式下是故意不订阅的）
+      final missingProgress =
+          !_suspendProgressStream && _progressSubscription == null;
+      if ((missingProgress || _completeSubscription == null) &&
           isKernelRunning) {
         _subscribeToKernelStreams();
       }
@@ -263,23 +307,68 @@ class IntegratedDownloadService extends ChangeNotifier {
     });
   }
 
+  /// 正在传输的任务必然需要快轮询；只剩「等待中」时，只在刚有过变化的
+  /// 短窗口内保持快轮询，之后退回空闲节奏。
+  bool _computeHasActiveDownloads() {
+    var hasPending = false;
+    for (final task in _tasks) {
+      if (task.status == DownloadStatus.downloading ||
+          task.status == DownloadStatus.merging) {
+        return true;
+      }
+      if (task.status == DownloadStatus.pending) {
+        hasPending = true;
+      }
+    }
+    if (!hasPending) {
+      return false;
+    }
+    return DateTime.now().difference(_lastTaskProgressAt) <
+        _pendingFastPollWindow;
+  }
+
+  void _markTaskProgress() {
+    _lastTaskProgressAt = DateTime.now();
+  }
+
   Duration _resolvePollingInterval() {
     if (_hasActiveDownloads) {
-      return _isBackgroundMode
-          ? _backgroundActivePollingInterval
-          : _activePollingInterval;
+      return switch (_currentPowerMode) {
+        AppPowerMode.active => _activePollingInterval,
+        AppPowerMode.background => _backgroundActivePollingInterval,
+        AppPowerMode.ultraLite => _ultraLiteActivePollingInterval,
+      };
     }
 
-    return _isBackgroundMode
-        ? _backgroundIdlePollingInterval
-        : _idlePollingInterval;
+    return switch (_currentPowerMode) {
+      AppPowerMode.active => _idlePollingInterval,
+      AppPowerMode.background => _backgroundIdlePollingInterval,
+      AppPowerMode.ultraLite => _ultraLiteIdlePollingInterval,
+    };
   }
+
+  /// 节流窗口随功耗档位放宽：窗口隐藏时每一次重建都是纯浪费，
+  /// 但 3 秒一次仍能让托盘提示、独立弹窗桥这类旁路及时看到新数据。
+  Duration get _minNotifyInterval => _currentPowerMode == AppPowerMode.active
+      ? _foregroundNotifyInterval
+      : _backgroundNotifyInterval;
 
   /// 从根源 override notifyListeners，所有通知强制走节流
   /// 外部调用 notifyListeners() 默认走节流模式
   /// 需要立即通知时，先设 _immediate = true 再调用
   @override
   void notifyListeners() {
+    // 极致精简模式：任务数据照常写入 _tasks，但一次界面重建都不做，
+    // 攒到唤醒时用一次 notifyNow() 补齐。
+    if (_currentPowerMode == AppPowerMode.ultraLite) {
+      _immediate = false;
+      _notifyTimer?.cancel();
+      _notifyTimer = null;
+      _pendingNotify = false;
+      _pendingWakeNotify = true;
+      return;
+    }
+
     if (_immediate) {
       _immediate = false;
       _notifyTimer?.cancel();
@@ -292,7 +381,8 @@ class IntegratedDownloadService extends ChangeNotifier {
 
     // 节流模式
     final now = DateTime.now();
-    if (now.difference(_lastNotify) >= _minNotifyInterval) {
+    final interval = _minNotifyInterval;
+    if (now.difference(_lastNotify) >= interval) {
       _lastNotify = now;
       _appLogger.debug('App', 'Notifying UI listeners (throttled-pass)');
       super.notifyListeners();
@@ -304,7 +394,7 @@ class IntegratedDownloadService extends ChangeNotifier {
     _pendingNotify = true;
 
     _notifyTimer?.cancel();
-    _notifyTimer = Timer(_minNotifyInterval, () {
+    _notifyTimer = Timer(interval, () {
       _pendingNotify = false;
       _lastNotify = DateTime.now();
       _appLogger.debug('App', 'Notifying UI listeners (throttled-deferred)');
@@ -339,6 +429,7 @@ class IntegratedDownloadService extends ChangeNotifier {
         taskIndices[newTask.id] = _tasks.length - 1;
         hasChanges = true;
         hasCriticalChange = true;
+        _markTaskProgress();
         if (newTask.status == DownloadStatus.failed) {
           DownloadFailureStatsService().recordFailure(newTask);
         }
@@ -353,15 +444,22 @@ class IntegratedDownloadService extends ChangeNotifier {
           (oldTask.progress - newTask.progress).abs() > 0.001;
       final speedChanged = oldTask.speed != newTask.speed;
       final errorChanged = oldTask.error != newTask.error;
+      final detailChanged = oldTask.statusDetail != newTask.statusDetail ||
+          oldTask.peerCount != newTask.peerCount ||
+          oldTask.seederCount != newTask.seederCount;
 
       if (statusChanged ||
           sizeChanged ||
           progressChanged ||
           speedChanged ||
-          errorChanged) {
+          errorChanged ||
+          detailChanged) {
         _tasks[existingIndex] = newTask;
         hasChanges = true;
         hasCriticalChange = hasCriticalChange || statusChanged || sizeChanged;
+        if (statusChanged || sizeChanged || progressChanged) {
+          _markTaskProgress();
+        }
         if (statusChanged && newTask.status == DownloadStatus.failed) {
           DownloadFailureStatsService().recordFailure(newTask);
         }
@@ -386,10 +484,7 @@ class IntegratedDownloadService extends ChangeNotifier {
           _hasLoadedOnce = true;
           notifyNow();
         }
-        _hasActiveDownloads = _tasks.any((t) =>
-            t.status == DownloadStatus.downloading ||
-            t.status == DownloadStatus.merging ||
-            t.status == DownloadStatus.pending);
+        _hasActiveDownloads = _computeHasActiveDownloads();
         return;
       }
 
@@ -502,10 +597,7 @@ class IntegratedDownloadService extends ChangeNotifier {
       }
 
       // 更新活跃下载状态，用于智能轮询
-      final newHasActiveDownloads = _tasks.any((t) =>
-          t.status == DownloadStatus.downloading ||
-          t.status == DownloadStatus.merging ||
-          t.status == DownloadStatus.pending);
+      final newHasActiveDownloads = _computeHasActiveDownloads();
       if (newHasActiveDownloads != _hasActiveDownloads) {
         _hasActiveDownloads = newHasActiveDownloads;
         _appLogger.debug('App',
@@ -552,7 +644,7 @@ class IntegratedDownloadService extends ChangeNotifier {
       'hostConcurrencyReason': task.hostConcurrencyReason,
       'kernelId': task.kernelId,
       'downloadCore': task.kernelId == kernel.DownloadTask.neoNsfKernelId
-          ? 'NeoNSFX'
+          ? 'NeoNSF'
           : 'NSFX',
       'segments': task.segments
           .map((s) => {
@@ -652,7 +744,7 @@ class IntegratedDownloadService extends ChangeNotifier {
     final kernelId =
         kernelTask['kernelId']?.toString() ?? kernel.DownloadTask.nsfxKernelId;
     final downloadCore = kernelTask['downloadCore']?.toString() ??
-        (kernelId == kernel.DownloadTask.neoNsfKernelId ? 'NeoNSFX' : 'NSFX');
+        (kernelId == kernel.DownloadTask.neoNsfKernelId ? 'NeoNSF' : 'NSFX');
     final effectiveHttpVersionPolicy =
         kernelTask['effectiveHttpVersionPolicy']?.toString();
     final negotiatedHttpVersion =
@@ -806,6 +898,7 @@ class IntegratedDownloadService extends ChangeNotifier {
       _appLogger.info('App',
           'Task added successfully: $taskId - $fileName (${result.handlerId})');
       // 立即切换到快速轮询模式
+      _markTaskProgress();
       _hasActiveDownloads = true;
       // 立即更新任务列表
       await _updateTasks();
@@ -834,6 +927,7 @@ class IntegratedDownloadService extends ChangeNotifier {
         } else {
           _tasks[existingIndex] = pluginTask;
         }
+        _markTaskProgress();
         _hasActiveDownloads = true;
         notifyNow();
       }
@@ -1318,10 +1412,12 @@ class IntegratedDownloadService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _powerMode.removeListener(_handlePowerModeChanged);
     _pollTimer?.cancel();
     _notifyTimer?.cancel();
     _progressSubscription?.cancel();
     _completeSubscription?.cancel();
+    unawaited(_pluginTaskService.flush());
     super.dispose();
   }
 }

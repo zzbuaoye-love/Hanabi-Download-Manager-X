@@ -35,8 +35,8 @@ if (-not (Test-Path -LiteralPath $exe)) {
 }
 
 $probe = & $exe --probe | ConvertFrom-Json
-if (-not $probe.ready -or $probe.protocolVersion -ne 1) {
-    throw 'NeoNSFX protocol probe failed.'
+if (-not $probe.ready -or $probe.protocolVersion -ne 2) {
+    throw "NeoNSF protocol probe failed (protocolVersion=$($probe.protocolVersion), expected 2)."
 }
 
-Write-Host "NeoNSFX $($probe.version) ready: $exe"
+Write-Host "NeoNSF $($probe.version) ready (protocol $($probe.protocolVersion), http3=$($probe.http3)): $exe"
