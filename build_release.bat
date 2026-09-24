@@ -2,6 +2,12 @@
 chcp 65001 >nul
 setlocal EnableExtensions DisableDelayedExpansion
 
+:: NativeAOT asks vswhere for the MSVC linker. Visual Studio installs it here
+:: even when the Installer directory is absent from PATH.
+if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
+    set "PATH=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer;%PATH%"
+)
+
 :: Color setup (set NO_COLOR=1 to disable)
 set "C_RESET="
 set "C_WHITE="
@@ -40,6 +46,7 @@ set "RELEASE_PACKAGE_VERSIONED=%RELEASE_DIR%\HanabiDownloadManagerX_%APP_VERSION
 set "RELEASE_CHECKSUMS=%RELEASE_DIR%\SHA256SUMS.txt"
 set "RHTTP_FIX_SCRIPT=scripts\apply-rhttp-windows-fix.ps1"
 set "UPDATER_TEST_SCRIPT=scripts\test-updater-bundle.ps1"
+set "NEONSF_TEST_SCRIPT=scripts\test-neonsf-bundle.ps1"
 set "NEONSF_BUILD_SCRIPT=neonsf\build_dotnet.ps1"
 set "NEONSF_DIST_DIR=build\neonsf\win-x64"
 
@@ -155,9 +162,14 @@ if not exist "%NEONSF_DIST_DIR%\HanabiNeoNSF.exe" (
 )
 
 echo %C_WHITE%[1.7/3] Probing NeoNSFX without opening a window...%C_RESET%
-"%NEONSF_DIST_DIR%\HanabiNeoNSF.exe" --probe >nul
+if not exist "%NEONSF_TEST_SCRIPT%" (
+    echo %C_RED%[ERROR] NeoNSFX protocol probe script is missing.%C_RESET%
+    call :maybe_pause
+    exit /b 1
+)
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%NEONSF_TEST_SCRIPT%" -BundleDirectory "%NEONSF_DIST_DIR%"
 if errorlevel 1 (
-    echo %C_RED%[ERROR] NeoNSFX launch probe failed!%C_RESET%
+    echo %C_RED%[ERROR] NeoNSFX launch/protocol probe failed!%C_RESET%
     call :maybe_pause
     exit /b 1
 )
@@ -220,6 +232,12 @@ mkdir "%ASSETS_DIR%\neonsf"
 xcopy /E /I /Y "%NEONSF_DIST_DIR%\*" "%ASSETS_DIR%\neonsf\" >nul
 if not exist "%ASSETS_DIR%\neonsf\HanabiNeoNSF.exe" (
     echo %C_RED%[ERROR] Packaged NeoNSFX executable is missing.%C_RESET%
+    call :maybe_pause
+    exit /b 1
+)
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%NEONSF_TEST_SCRIPT%" -BundleDirectory "%ASSETS_DIR%\neonsf"
+if errorlevel 1 (
+    echo %C_RED%[ERROR] Packaged NeoNSFX failed protocol verification.%C_RESET%
     call :maybe_pause
     exit /b 1
 )

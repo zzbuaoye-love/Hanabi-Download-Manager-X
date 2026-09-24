@@ -68,6 +68,7 @@ http://127.0.0.1:18080/download/normal/64m.bin
 ```text
 seed=7
 chunkBytes=65536
+归属地
 delayMs=25
 failAfterBytes=262144
 stallMs=6000

@@ -2,6 +2,12 @@
 
 Hanabi Download Manager X 的用户、插件和工程文档入口。
 
+## 开始使用
+
+- [项目概览](OVERVIEW_CN.md)
+- [构建与开发](BUILD_CN.md)
+- [技术 FAQ](faq/FAQ.md)
+
 ## 插件开发
 
 ### 入门
@@ -30,6 +36,7 @@ Hanabi Download Manager X 的用户、插件和工程文档入口。
 
 ## 下载内核
 
+- [下载内核总览](DOWNLOAD_KERNEL_CN.md)
 - [下载核心架构 v2](DOWNLOAD_CORE_ARCHITECTURE_V2_CN.md)
 - [NeonSF 架构](NEONSF_ARCHITECTURE_CN.md)
 - [下载测试服务器](DOWNLOAD_TEST_SERVER_CN.md)
@@ -39,7 +46,6 @@ Hanabi Download Manager X 的用户、插件和工程文档入口。
 - [更新器构建](UPDATER_BUILD_CN.md)
 - [添加中文本地化](i18n/ADD_NEW_LANGUAGE_CN.md)
 - [添加新语言](i18n/ADD_NEW_LANGUAGE.md)
-- [技术 FAQ](faq/FAQ.md)
 
 ## 插件工具
 

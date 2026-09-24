@@ -4,7 +4,7 @@
 name: hanabi_download_manager_x
 description: A EASY AND BEAUTIFUL DOWNLOAD MANAGER
 publish_to: 'none'
-version: 1.5.0+20260719
+version: 1.5.0+20260924
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -63,6 +63,7 @@ flutter:
     - assets/logo/logo.png
     - assets/logo/logo.ico
     - assets/logo/color_logo/
+    - assets/flags/
     - assets/font/FluentSystemIcons-Regular.json
   
   fonts:
