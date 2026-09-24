@@ -52,5 +52,21 @@ def remove(params: dict[str, Any], context: PluginContext) -> dict[str, Any]:
     return service.remove(params)
 
 
+@plugin.method("onSettingsChanged")
+@expose
+def on_settings_changed(
+    params: dict[str, Any], context: PluginContext
+) -> dict[str, Any]:
+    return service.apply_settings(params)
+
+
+@plugin.method("ed2k.network.refresh")
+@expose
+def refresh_network_lists(
+    params: dict[str, Any], context: PluginContext
+) -> dict[str, Any]:
+    return service.refresh_network_lists()
+
+
 if __name__ == "__main__":
     raise SystemExit(plugin.run())

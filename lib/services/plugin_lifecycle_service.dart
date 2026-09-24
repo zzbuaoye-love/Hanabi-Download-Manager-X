@@ -14,6 +14,22 @@ import 'app_logger_service.dart';
 import 'client_config_service.dart';
 import 'plugin_diagnostic_logger.dart';
 
+/// A link protocol the app can currently accept in the add-download flow.
+///
+/// [key] is a canonical identifier: `http`, `magnet`, `torrent_file`,
+/// `ed2k`, `resolver`, or a custom scheme such as `hanabi+demo`.
+class SupportedProtocol {
+  const SupportedProtocol({
+    required this.key,
+    required this.builtIn,
+    this.pluginNames = const <String>[],
+  });
+
+  final String key;
+  final bool builtIn;
+  final List<String> pluginNames;
+}
+
 class PluginLifecycleService extends ChangeNotifier {
   static final PluginLifecycleService _instance =
       PluginLifecycleService._internal();
@@ -1001,6 +1017,77 @@ class PluginLifecycleService extends ChangeNotifier {
       }
     }
     return candidates.first;
+  }
+
+  /// Aggregated view of every link protocol the app can accept right now:
+  /// built-in HTTP(S) plus everything contributed by enabled plugins via
+  /// `download:*` / `intent:*` capabilities and custom intent schemes.
+  List<SupportedProtocol> supportedProtocols() {
+    final pluginNamesByKey = <String, List<String>>{};
+    final orderedKeys = <String>[];
+
+    void register(String key, InstalledPlugin plugin) {
+      final names = pluginNamesByKey.putIfAbsent(key, () {
+        orderedKeys.add(key);
+        return <String>[];
+      });
+      final name = plugin.name.isEmpty ? plugin.id : plugin.name;
+      if (!names.contains(name)) {
+        names.add(name);
+      }
+    }
+
+    for (final plugin in _plugins) {
+      if (!plugin.enabled || plugin.state != PluginInstallState.enabled) {
+        continue;
+      }
+      final manifest = plugin.manifest;
+      for (final capability in manifest.capabilities) {
+        final parts = capability.split(':');
+        if (parts.length < 2) {
+          if (capability == 'resolver') {
+            register('resolver', plugin);
+          }
+          continue;
+        }
+        final domain = parts[0];
+        if (domain != 'download' && domain != 'intent') {
+          continue;
+        }
+        final target = parts[1];
+        switch (target) {
+          case 'http':
+            // Covered by the built-in HTTP entry.
+            break;
+          case 'custom':
+            // Explicit intentSchemes are the authoritative display form; only
+            // derive a scheme from the capability when none are declared.
+            if (manifest.intentSchemes.isEmpty &&
+                parts.length >= 3 &&
+                parts[2].isNotEmpty) {
+              register('hanabi+${parts[2]}', plugin);
+            }
+            break;
+          default:
+            if (target.isNotEmpty) {
+              register(target, plugin);
+            }
+        }
+      }
+      for (final scheme in manifest.intentSchemes) {
+        register(scheme, plugin);
+      }
+    }
+
+    return <SupportedProtocol>[
+      const SupportedProtocol(key: 'http', builtIn: true),
+      for (final key in orderedKeys)
+        SupportedProtocol(
+          key: key,
+          builtIn: false,
+          pluginNames: List.unmodifiable(pluginNamesByKey[key]!),
+        ),
+    ];
   }
 
   String pluginLogDir(String pluginId) {

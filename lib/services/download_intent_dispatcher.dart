@@ -1,8 +1,23 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as path;
+
 import '../models/download_intent.dart';
 import 'app_logger_service.dart';
 import 'kernel/kernel_manager.dart';
 import 'plugin_lifecycle_service.dart';
 import 'plugin_process_runner.dart';
+
+/// Mirrors the kernel default so plugin downloads still land somewhere sane
+/// when the kernel has not started yet.
+String? _fallbackDownloadDir() {
+  final home =
+      Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'] ?? '';
+  if (home.isEmpty) {
+    return null;
+  }
+  return path.join(home, 'Downloads');
+}
 
 enum DownloadDispatchErrorCode {
   invalidIntent,
@@ -47,6 +62,20 @@ class DownloadDispatchRequest {
         'startPaused': startPaused,
         if (expectedSizeHint != null) 'expectedSizeHint': expectedSizeHint,
       };
+
+  DownloadDispatchRequest withSaveDir(String value) {
+    return DownloadDispatchRequest(
+      intent: intent,
+      fileName: fileName,
+      referer: referer,
+      userAgent: userAgent,
+      cookies: cookies,
+      headers: headers,
+      saveDir: value,
+      startPaused: startPaused,
+      expectedSizeHint: expectedSizeHint,
+    );
+  }
 }
 
 class DownloadDispatchResult {
@@ -176,13 +205,16 @@ class PluginDownloadIntentHandler implements DownloadIntentHandler {
     PluginLifecycleService? pluginService,
     PluginProcessRunner? runner,
     AppLoggerService? logger,
+    Future<String?> Function()? saveDirResolver,
   })  : _pluginService = pluginService ?? PluginLifecycleService(),
         _runner = runner ?? PluginProcessRunner(),
-        _logger = logger ?? AppLoggerService();
+        _logger = logger ?? AppLoggerService(),
+        _saveDirResolver = saveDirResolver;
 
   final PluginLifecycleService _pluginService;
   final PluginProcessRunner _runner;
   final AppLoggerService _logger;
+  final Future<String?> Function()? _saveDirResolver;
 
   @override
   String get id => 'plugin-download';
@@ -192,8 +224,30 @@ class PluginDownloadIntentHandler implements DownloadIntentHandler {
     return intent.isRecognized && intent.type != DownloadIntentType.http;
   }
 
+  /// Plugins have no notion of the app's download folder. Without an explicit
+  /// directory their backends fall back to their own working directory, which
+  /// buries finished torrents and ED2K files inside the plugin data folder.
+  Future<DownloadDispatchRequest> _applyDefaultSaveDir(
+    DownloadDispatchRequest request,
+  ) async {
+    if (request.saveDir?.trim().isNotEmpty ?? false) {
+      return request;
+    }
+    try {
+      final resolved = (await _saveDirResolver?.call())?.trim();
+      if (resolved != null && resolved.isNotEmpty) {
+        return request.withSaveDir(resolved);
+      }
+    } catch (error) {
+      _logger.warning('Plugin', 'Failed to resolve default save dir: $error');
+    }
+    return request;
+  }
+
   @override
-  Future<DownloadDispatchResult> handle(DownloadDispatchRequest request) async {
+  Future<DownloadDispatchResult> handle(
+      DownloadDispatchRequest originalRequest) async {
+    final request = await _applyDefaultSaveDir(originalRequest);
     await _pluginService.ensureInitialized();
     final plugin = _pluginService.resolvePluginForIntent(request.intent);
     if (plugin == null) {
@@ -263,6 +317,8 @@ class DownloadIntentDispatcher {
           PluginDownloadIntentHandler(
             pluginService: pluginService,
             logger: logger,
+            saveDirResolver: () async =>
+                await kernelManager.getDownloadDir() ?? _fallbackDownloadDir(),
           ),
         ];
 

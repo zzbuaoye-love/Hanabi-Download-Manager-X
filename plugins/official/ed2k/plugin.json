@@ -4,7 +4,7 @@
   "apiVersion": "1.0",
   "id": "hanabi.official.ed2k",
   "name": "Hanabi ED2K",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Hanabi Download Manager X",
   "description": "Official ED2K file download support powered by an isolated aMule backend.",
   "category": "download",
@@ -24,5 +24,84 @@
   "minAppVersion": "1.5.0",
   "runtime": {
     "timeoutSeconds": 300
+  },
+  "ui_extensions": {
+    "settings": [
+      {
+        "type": "text",
+        "id": "network_hint",
+        "label": "网络连接",
+        "description": "ED2K 任务停在等待中通常是没有来源，而不是出错。服务器满员时 Kad 才是主要的找源途径，能否拿到 HighID 直接决定可用来源数量。"
+      },
+      {
+        "type": "switch",
+        "id": "enableUpnp",
+        "label": "UPnP 端口映射",
+        "description": "关闭后本机将处于 LowID，只能连接非防火墙用户。",
+        "default": true
+      },
+      {
+        "type": "text_input",
+        "id": "listenPort",
+        "label": "监听端口",
+        "description": "留空则每次随机分配，无法做固定端口转发。填一个已在路由器转发、并在防火墙放行的端口（1024-65535）才可能拿到 HighID；UDP 端口自动取该值 +10。",
+        "placeholder": "4662"
+      },
+      {
+        "type": "switch",
+        "id": "autoConnect",
+        "label": "启动时自动连接 ED2K 与 Kad",
+        "default": true
+      },
+      {
+        "type": "switch",
+        "id": "bootstrapNetwork",
+        "label": "自动补齐服务器列表与 Kad 节点",
+        "description": "首次运行时下载 server.met 与 nodes.dat，缺少它们的守护进程找不到任何来源。",
+        "default": true
+      },
+      {
+        "type": "text_input",
+        "id": "serverMetUrl",
+        "label": "服务器列表地址",
+        "description": "多个地址用空格或换行分隔，按顺序尝试，排在内置列表之前。",
+        "placeholder": "https://example.org/server.met"
+      },
+      {
+        "type": "switch",
+        "id": "useDefaultServerLists",
+        "label": "同时使用内置服务器列表",
+        "description": "关闭后只使用上面填写的地址。内置列表包含官方源与两个第三方镜像。",
+        "default": true
+      },
+      {
+        "type": "text_input",
+        "id": "kadNodesUrl",
+        "label": "Kad 节点表地址",
+        "description": "多个地址用空格或换行分隔。服务器满员时 Kad 是主要的找源途径。",
+        "placeholder": "https://example.org/nodes.dat"
+      },
+      {
+        "type": "switch",
+        "id": "useDefaultKadNodes",
+        "label": "同时使用内置 Kad 节点源",
+        "default": true
+      },
+      {
+        "type": "slider",
+        "id": "maxSourcesPerFile",
+        "label": "每个文件的最大来源数",
+        "min": 100,
+        "max": 1000,
+        "divisions": 9,
+        "default": 1000
+      },
+      {
+        "type": "button",
+        "id": "refresh_network_lists",
+        "label": "立即更新服务器列表与 Kad 节点",
+        "action": "ed2k.network.refresh"
+      }
+    ]
   }
 }

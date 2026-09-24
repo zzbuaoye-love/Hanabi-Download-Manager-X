@@ -5,8 +5,11 @@ import '../../l10n/app_localizations.dart';
 import '../../models/download_intent.dart';
 import '../../models/download_task.dart';
 import '../../services/integrated_download_service.dart';
+import '../../services/plugin_lifecycle_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/fluent_icons.dart' as custom_icons;
 import '../../widgets/animated_notifications.dart';
+import '../../widgets/fluent_interactions.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
 
 enum _DuplicateAction {
@@ -137,6 +140,9 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     final dialogWidth = availableWidth.clamp(0.0, 480.0).toDouble();
     final dialogMaxHeight = (size.height - 48).clamp(0.0, 720.0).toDouble();
     final theme = FluentTheme.of(context);
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
 
     return ContentDialog(
       constraints: BoxConstraints(
@@ -157,7 +163,29 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
         ),
         actionsPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       ),
-      title: Text(t.addDownloadTitle),
+      // WinUI 图标磁贴 + 标题，和各页面页头保持同一套视觉
+      title: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppTheme.accentPrimary.withValues(
+                alpha: AppTheme.isDarkContext(context) ? 0.16 : 0.10,
+              ),
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            ),
+            child: Icon(
+              custom_icons.FluentIcons.download,
+              size: 16,
+              color: accent,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(t.addDownloadTitle)),
+        ],
+      ),
       content: _buildContent(context),
       actions: _buildActions(),
     );
@@ -174,16 +202,20 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
         children: [
           Text(
             t.addDownloadSubtitle,
-            style: theme.typography.body?.copyWith(
+            style: theme.typography.caption?.copyWith(
+              fontSize: 13,
+              height: 1.45,
               color: theme.resources.textFillColorSecondary,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          _buildProtocolSupport(context),
+          const SizedBox(height: 18),
           _buildUrlInput(context),
           AnimatedSwitcher(
-            duration: theme.fastAnimationDuration,
-            switchInCurve: Curves.easeOut,
-            switchOutCurve: Curves.easeIn,
+            duration: AppTheme.motionFast,
+            switchInCurve: AppTheme.motionStandard,
+            switchOutCurve: AppTheme.motionAccelerate,
             child: _buildUrlFeedback(context),
           ),
           const SizedBox(height: 16),
@@ -222,26 +254,128 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
         placeholder: t.addDownloadUrlPlaceholder,
         highlightColor: _urlError == null ? null : errorColor,
         unfocusedColor: _urlError == null ? null : errorColor,
+        prefix: Padding(
+          padding: const EdgeInsets.only(left: 10, right: 2),
+          child: Icon(
+            custom_icons.FluentIcons.link,
+            size: 14,
+            color: AppTheme.textTertiary,
+          ),
+        ),
         suffix: _urlController.text.isEmpty
             ? null
-            : SmallIconButton(
-                child: Tooltip(
-                  message: t.logClearFiltersButton,
-                  child: IconButton(
-                    icon: const Icon(FluentIcons.clear, size: 12),
-                    onPressed: _isLoading
-                        ? null
-                        : () {
-                            _urlController.clear();
-                            _urlFocusNode.requestFocus();
-                          },
-                  ),
+            : Padding(
+                padding: const EdgeInsets.only(right: 4),
+                // 清除按钮的高亮铺满自身 24×24 命中区域
+                child: FluentIconButton(
+                  icon: FluentIcons.clear,
+                  size: 24,
+                  iconSize: 11,
+                  tooltip: t.logClearFiltersButton,
+                  onPressed: _isLoading
+                      ? null
+                      : () {
+                          _urlController.clear();
+                          _urlFocusNode.requestFocus();
+                        },
                 ),
               ),
         textInputAction: TextInputAction.done,
         onSubmitted: (_) {
           if (!_isLoading) _handleSubmit();
         },
+      ),
+    );
+  }
+
+  /// Human readable label for a canonical protocol key coming from
+  /// [PluginLifecycleService.supportedProtocols].
+  String _protocolLabel(String key) {
+    switch (key) {
+      case 'http':
+        return t.addDownloadProtocolHttp;
+      case 'magnet':
+        return t.addDownloadProtocolMagnet;
+      case 'torrent_file':
+        return t.addDownloadProtocolTorrentFile;
+      case 'ed2k':
+        return t.addDownloadProtocolEd2k;
+      case 'resolver':
+        return t.addDownloadProtocolResolver;
+      default:
+        return key;
+    }
+  }
+
+  String _intentTypeLabel(DownloadIntent intent) {
+    switch (intent.type) {
+      case DownloadIntentType.http:
+        return t.addDownloadProtocolHttp;
+      case DownloadIntentType.magnet:
+        return t.addDownloadProtocolMagnet;
+      case DownloadIntentType.torrentFile:
+        return t.addDownloadProtocolTorrentFile;
+      case DownloadIntentType.ed2k:
+        return t.addDownloadProtocolEd2k;
+      case DownloadIntentType.resolver:
+        return t.addDownloadProtocolResolver;
+      case DownloadIntentType.custom:
+        return intent.uri?.scheme ?? t.downloadIntentTypeUnknown;
+      case DownloadIntentType.unsupported:
+        return t.downloadIntentTypeUnknown;
+    }
+  }
+
+  /// 支持的协议：收进一块 subtle 信息条里，标签和徽标同处一个层级，
+  /// 不再是一排各自带描边、互相打架的小方块。
+  Widget _buildProtocolSupport(BuildContext context) {
+    final protocols =
+        context.watch<PluginLifecycleService>().supportedProtocols();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFillHover,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+      ),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: Text(
+              t.addDownloadSupportedProtocolsLabel,
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+          ),
+          for (final protocol in protocols)
+            _buildProtocolChip(context, protocol),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProtocolChip(BuildContext context, SupportedProtocol protocol) {
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+    final tooltip = protocol.builtIn
+        ? t.addDownloadProtocolBuiltIn
+        : t.addDownloadProtocolProvidedBy(protocol.pluginNames.join(', '));
+
+    // 插件提供的协议用 accent 着色区分，内置协议保持中性
+    return Tooltip(
+      message: tooltip,
+      child: FluentChip(
+        label: _protocolLabel(protocol.key),
+        icon: protocol.builtIn ? null : custom_icons.FluentIcons.apps_20,
+        color: protocol.builtIn ? null : accent,
       ),
     );
   }
@@ -278,40 +412,127 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       );
     }
 
-    if (_parsedFileName == null || _showAdvanced) {
+    final rows = <Widget>[];
+    final routingRow = _buildPluginRoutingRow(context);
+    if (routingRow != null) {
+      rows.add(routingRow);
+    }
+
+    if (_parsedFileName != null && !_showAdvanced) {
+      rows.add(
+        Row(
+          children: [
+            Icon(
+              FluentIcons.document_approval,
+              size: 12,
+              color: theme.resources.systemFillColorSuccess,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${t.addDownloadParsedFileNameTitle}:',
+              style: theme.typography.caption?.copyWith(
+                color: theme.resources.textFillColorSecondary,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                _parsedFileName!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.typography.caption?.copyWith(
+                  color: theme.resources.textFillColorPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (rows.isEmpty) {
       return const SizedBox.shrink(key: ValueKey('url-feedback-empty'));
     }
 
     return Padding(
-      key: const ValueKey('parsed-file-name'),
+      key: ValueKey('url-feedback-${rows.length}-${routingRow != null}'),
       padding: const EdgeInsets.only(top: 6),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            FluentIcons.document_approval,
-            size: 12,
-            color: theme.resources.systemFillColorSuccess,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '${t.addDownloadParsedFileNameTitle}:',
-            style: theme.typography.caption?.copyWith(
-              color: theme.resources.textFillColorSecondary,
+          for (var i = 0; i < rows.length; i++) ...[
+            if (i > 0) const SizedBox(height: 4),
+            rows[i],
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Feedback line telling the user which plugin (if any) will handle a
+  /// recognized non-HTTP link.
+  Widget? _buildPluginRoutingRow(BuildContext context) {
+    final theme = FluentTheme.of(context);
+    final url = _urlController.text.trim();
+    if (url.isEmpty) {
+      return null;
+    }
+
+    final intent = DownloadIntent.parse(url);
+    if (!intent.isRecognized || intent.isHttp) {
+      return null;
+    }
+
+    final pluginService = context.watch<PluginLifecycleService>();
+    final handler = pluginService.resolvePluginForIntent(intent);
+    final typeLabel = _intentTypeLabel(intent);
+
+    if (handler != null) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              custom_icons.FluentIcons.apps_20,
+              size: 12,
+              color: theme.accentColor,
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
-              _parsedFileName!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              t.addDownloadIntentPluginReady(typeLabel, handler.name),
               style: theme.typography.caption?.copyWith(
-                color: theme.resources.textFillColorPrimary,
+                color: theme.resources.textFillColorSecondary,
               ),
             ),
           ),
         ],
-      ),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(
+            custom_icons.FluentIcons.warning,
+            size: 12,
+            color: theme.resources.systemFillColorCaution,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            t.addDownloadIntentNoPlugin(typeLabel),
+            style: theme.typography.caption?.copyWith(
+              color: theme.resources.systemFillColorCaution,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -343,6 +564,21 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
           _fileNameFocusNode.requestFocus();
         }
       },
+      // 与全局卡片一致的圆角 4 / 中性描边，避免这里单独一套圆角
+      headerShape: (expanded) => RoundedRectangleBorder(
+        side: BorderSide(color: AppTheme.borderDefault),
+        borderRadius: expanded
+            ? const BorderRadius.vertical(
+                top: Radius.circular(AppTheme.radiusSm))
+            : BorderRadius.circular(AppTheme.radiusSm),
+      ),
+      contentShape: (expanded) => RoundedRectangleBorder(
+        side: BorderSide(color: AppTheme.borderDefault),
+        borderRadius: const BorderRadius.vertical(
+          bottom: Radius.circular(AppTheme.radiusSm),
+        ),
+      ),
+      contentBackgroundColor: AppTheme.subtleFillHover,
       contentPadding: const EdgeInsets.all(16),
       content: InfoLabel(
         label: '${t.addDownloadFileNameLabel} (${t.addDownloadOptionalBadge})',
@@ -473,6 +709,18 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     if (!url.startsWith('test_task_') && !intent.isRecognized) {
       _showUrlError(t.addDownloadErrorInvalidUrl);
       return;
+    }
+
+    // Non-HTTP links are dispatched to plugins; fail fast with a clear hint
+    // when no enabled plugin can handle the protocol instead of surfacing a
+    // dispatcher error after submission.
+    if (intent.isRecognized && !intent.isHttp) {
+      final pluginService = context.read<PluginLifecycleService>();
+      final handler = pluginService.resolvePluginForIntent(intent);
+      if (handler == null) {
+        _showUrlError(t.addDownloadIntentNoPlugin(_intentTypeLabel(intent)));
+        return;
+      }
     }
 
     setState(() => _urlError = null);

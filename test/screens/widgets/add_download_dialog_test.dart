@@ -2,7 +2,9 @@ import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hanabi_download_manager_x/l10n/app_localizations.dart';
 import 'package:hanabi_download_manager_x/screens/widgets/add_download_dialog.dart';
+import 'package:hanabi_download_manager_x/services/plugin_lifecycle_service.dart';
 import 'package:hanabi_download_manager_x/theme/app_theme.dart';
+import 'package:provider/provider.dart';
 
 Widget _buildTestApp({
   String? initialUrl,
@@ -22,9 +24,17 @@ Widget _buildTestApp({
     theme: theme,
     home: ColoredBox(
       color: AppTheme.bgSolid,
-      child: AddDownloadDialog(
-        initialUrl: initialUrl,
-        onMuteClipboardForSession: onMuteClipboardForSession,
+      // The dialog reads PluginLifecycleService to render the supported
+      // protocol chips and the plugin routing hint. Both production call
+      // sites sit under main.dart's MultiProvider; mirror that here. The
+      // uninitialized singleton holds no plugins, so only the built-in
+      // HTTP chip is rendered.
+      child: ChangeNotifierProvider<PluginLifecycleService>.value(
+        value: PluginLifecycleService(),
+        child: AddDownloadDialog(
+          initialUrl: initialUrl,
+          onMuteClipboardForSession: onMuteClipboardForSession,
+        ),
       ),
     ),
   );

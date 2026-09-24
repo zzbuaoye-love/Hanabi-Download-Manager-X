@@ -61,7 +61,7 @@
 | `priority` | integer | 否 | `0` | 多插件匹配时的优先级，范围 `-1000` 至 `1000`。 |
 | `permissions` | string[] / object | 否 | `[]` | 安全能力声明。 |
 | `runtime` | object | 否 | 自动检测 | 运行命令、参数、环境和超时。 |
-| `ui_extensions` | object | 否 | - | 设置页和侧边栏贡献点。 |
+| `ui_extensions` | object | 否 | - | 设置页、侧边栏和插件页面贡献点。 |
 | `theme_overrides` | object | 否 | - | 实验性主题覆盖。 |
 
 ## 路径规则
@@ -91,6 +91,16 @@
 | `theme_provider` | 实验性主题提供者。 |
 
 能力名称必须使用小写命名空间格式。插件可以声明宿主尚未识别的能力，用于市场展示或未来扩展；未知能力不会自动触发调用。
+
+### 能力在界面上的可见性
+
+插件启用后，上表中的下载类能力会直接反映到"新建下载任务"对话框：
+
+- 对话框顶部的"当前支持"标签会为每个可用协议显示一个胶囊；插件提供的胶囊带有插件图标，悬停显示提供者名称。内置 HTTP/HTTPS 始终存在。
+- `intent:custom:<name>` / `download:custom:<name>` 显示为 `hanabi+<name>`；如果清单声明了 `intent_schemes`，则以声明的 scheme 为准。
+- 用户粘贴非 HTTP 链接时，对话框会实时提示"将由「<插件名>」插件处理"，或在没有可用插件时给出警告并拒绝提交。
+
+因此声明能力就等于向用户宣告支持该协议——不要声明插件实际无法处理的能力。
 
 ## 自定义 URI 路由
 
@@ -170,7 +180,7 @@ plugin+cloud://download/123
 
 ## UI 扩展
 
-`ui_extensions` 支持 `settings` 和 `sidebar` 两个挂载点。宿主只渲染声明式控件，不会加载插件提供的 Flutter 代码。字段与事件见[UI 扩展](UI_EXTENSIONS_CN.md)。
+`ui_extensions` 支持 `settings`、`sidebar` 和 `pages` 三个挂载点。`pages` 可以声明独立侧边栏页面，或替换白名单内的内置页面（当前仅 `completed`），并支持 `provider` 动态内容。宿主只渲染声明式控件，不会加载插件提供的 Flutter 代码。字段与事件见[UI 扩展](UI_EXTENSIONS_CN.md)。
 
 ## 编辑器 Schema
 

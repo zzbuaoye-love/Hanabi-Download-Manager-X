@@ -188,6 +188,161 @@ class PluginPermissionSet {
   }
 }
 
+/// A full page contributed by a plugin through `ui_extensions.pages`.
+///
+/// A page either shows up as its own sidebar entry (when [replaces] is null)
+/// or takes over one of the replaceable built-in pages (currently only
+/// `completed`). Content is rendered from the same declarative element schema
+/// used by the sidebar; when [provider] is set the host additionally asks the
+/// plugin for a fresh element list at runtime.
+class PluginPageExtension {
+  const PluginPageExtension({
+    required this.id,
+    required this.title,
+    this.icon,
+    this.replaces,
+    this.placement = PluginSidebarPlacement.bottom,
+    this.elements = const <PluginUIElement>[],
+    this.provider,
+    this.refreshSeconds = 0,
+  });
+
+  /// Built-in pages that plugins are allowed to replace.
+  static const Set<String> replaceableBuiltInPages = <String>{'completed'};
+
+  static const int minRefreshSeconds = 5;
+  static const int maxRefreshSeconds = 3600;
+
+  final String id;
+  final String title;
+
+  /// `fluent:<name>` or a relative image path inside the plugin directory.
+  final String? icon;
+
+  /// Id of the built-in page this page replaces, or null for a standalone
+  /// page with its own sidebar entry.
+  final String? replaces;
+
+  /// Sidebar placement for standalone pages.
+  final PluginSidebarPlacement placement;
+
+  /// Static content, rendered when no [provider] is configured (and shown as
+  /// fallback while a provider call is in flight or failing).
+  final List<PluginUIElement> elements;
+
+  /// Optional plugin method invoked by the host to obtain a dynamic element
+  /// list. The method receives the page id, persisted state and host context
+  /// data, and must return `{"elements": [...]}`.
+  final String? provider;
+
+  /// Auto-refresh interval for [provider] pages. `0` disables polling.
+  final int refreshSeconds;
+
+  factory PluginPageExtension.fromJson(Object? raw) {
+    if (raw is! Map) {
+      return const PluginPageExtension(id: '', title: '');
+    }
+    final json = <String, dynamic>{
+      for (final entry in raw.entries) entry.key.toString(): entry.value,
+    };
+    final elementsRaw = json['elements'] ?? json['items'] ?? json['controls'];
+    final elements = <PluginUIElement>[];
+    if (elementsRaw is List) {
+      for (final rawElement in elementsRaw) {
+        try {
+          elements.add(PluginUIElement.fromJson(rawElement));
+        } catch (_) {
+          elements.add(const PluginUIElement(
+            type: PluginUIElementType.unknown,
+            id: '',
+            label: '',
+          ));
+        }
+      }
+    }
+    final refreshRaw = json['refreshSeconds'] ?? json['refresh_seconds'];
+    return PluginPageExtension(
+      id: json['id']?.toString().trim() ?? '',
+      title: json['title']?.toString().trim() ?? '',
+      icon: _optionalString(json['icon']),
+      replaces: _optionalString(json['replaces'])?.toLowerCase(),
+      placement: PluginManifest._placementFromRaw(
+        json['placement'] ?? json['position'],
+      ),
+      elements: List.unmodifiable(elements),
+      provider: _optionalString(json['provider']),
+      refreshSeconds: refreshRaw == null ? 0 : _strictInt(refreshRaw) ?? -1,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        if (icon != null) 'icon': icon,
+        if (replaces != null) 'replaces': replaces,
+        if (placement != PluginSidebarPlacement.bottom) 'placement': 'top',
+        if (elements.isNotEmpty)
+          'elements': elements.map((element) => element.toJson()).toList(),
+        if (provider != null) 'provider': provider,
+        if (refreshSeconds != 0) 'refresh_seconds': refreshSeconds,
+      };
+
+  List<String> validate(String context) {
+    final errors = <String>[];
+    if (id.trim().isEmpty) {
+      errors.add('$context requires an id');
+    } else if (!RegExp(r'^[a-z0-9][a-z0-9._-]{0,62}$').hasMatch(id)) {
+      errors.add(
+          '$context.id must use lowercase letters, numbers, dot, dash or underscore');
+    }
+    if (title.trim().isEmpty) {
+      errors.add('$context.$id requires a title');
+    }
+    if (replaces != null && !replaceableBuiltInPages.contains(replaces)) {
+      errors.add(
+        '$context.$id cannot replace "$replaces"; allowed: '
+        '${replaceableBuiltInPages.join(', ')}',
+      );
+    }
+    if (icon != null &&
+        !icon!.startsWith('fluent:') &&
+        !_isSafeRelativePath(icon!)) {
+      errors.add(
+          '$context.$id icon must be fluent:<name> or a relative path inside the plugin directory');
+    }
+    if (provider != null &&
+        !RegExp(r'^[A-Za-z][A-Za-z0-9._-]*$').hasMatch(provider!)) {
+      errors.add('$context.$id provider must be a valid method name');
+    }
+    if (refreshSeconds != 0 &&
+        (refreshSeconds < minRefreshSeconds ||
+            refreshSeconds > maxRefreshSeconds)) {
+      errors.add(
+        '$context.$id refresh_seconds must be 0 or between '
+        '$minRefreshSeconds and $maxRefreshSeconds',
+      );
+    }
+    if (refreshSeconds != 0 && provider == null) {
+      errors.add('$context.$id refresh_seconds requires a provider');
+    }
+    if (elements.isEmpty && provider == null) {
+      errors.add('$context.$id requires elements or a provider');
+    }
+    final ids = <String>{};
+    for (final element in elements) {
+      if (element.type == PluginUIElementType.unknown) {
+        errors.add('$context.$id.${element.id} has an unknown type');
+      }
+      if (element.id.trim().isEmpty) {
+        errors.add('$context.$id contains an element with an empty id');
+      } else if (!ids.add(element.id)) {
+        errors.add('$context.$id contains duplicate element id: ${element.id}');
+      }
+    }
+    return errors;
+  }
+}
+
 class PluginManifest {
   const PluginManifest({
     required this.id,
@@ -203,6 +358,7 @@ class PluginManifest {
     this.permissions = const PluginPermissionSet(),
     this.themeOverrides,
     this.uiExtensions,
+    this.pageExtensions = const <PluginPageExtension>[],
     this.sidebarPlacement = PluginSidebarPlacement.bottom,
     this.manifestVersion = currentManifestVersion,
     this.apiVersion = currentApiVersion,
@@ -231,6 +387,7 @@ class PluginManifest {
   final PluginPermissionSet permissions;
   final Map<String, dynamic>? themeOverrides;
   final Map<String, List<PluginUIElement>>? uiExtensions;
+  final List<PluginPageExtension> pageExtensions;
   final PluginSidebarPlacement sidebarPlacement;
   final int manifestVersion;
   final String apiVersion;
@@ -271,6 +428,7 @@ class PluginManifest {
       themeOverrides:
           _stringKeyedMap(json['theme_overrides'] ?? json['themeOverrides']),
       uiExtensions: _parseUiExtensions(uiExtensionsRaw),
+      pageExtensions: _parsePageExtensions(uiExtensionsRaw),
       sidebarPlacement: _parseSidebarPlacement(uiExtensionsRaw, json),
       manifestVersion: manifestVersionRaw == null
           ? currentManifestVersion
@@ -296,6 +454,11 @@ class PluginManifest {
     if (json is! Map) return null;
     final map = <String, List<PluginUIElement>>{};
     for (final entry in json.entries) {
+      // `pages` uses a richer schema and is parsed separately into
+      // [pageExtensions]; keep it out of the flat element map.
+      if (entry.key.toString() == 'pages') {
+        continue;
+      }
       final elementsRaw = _uiElementsRaw(entry.value);
       if (elementsRaw == null) {
         map[entry.key.toString()] = const <PluginUIElement>[
@@ -340,6 +503,19 @@ class PluginManifest {
     return null;
   }
 
+  static List<PluginPageExtension> _parsePageExtensions(dynamic uiExtensions) {
+    if (uiExtensions is! Map) {
+      return const <PluginPageExtension>[];
+    }
+    final pagesRaw = uiExtensions['pages'];
+    if (pagesRaw is! List) {
+      return const <PluginPageExtension>[];
+    }
+    return List.unmodifiable(
+      pagesRaw.map(PluginPageExtension.fromJson),
+    );
+  }
+
   static PluginSidebarPlacement _parseSidebarPlacement(
     dynamic uiExtensions,
     Map<String, dynamic> manifestJson,
@@ -355,6 +531,10 @@ class PluginManifest {
             sidebar['navPosition'];
       }
     }
+    return _placementFromRaw(rawPlacement);
+  }
+
+  static PluginSidebarPlacement _placementFromRaw(Object? rawPlacement) {
     final placement = rawPlacement?.toString().trim().toLowerCase();
     switch (placement) {
       case 'top':
@@ -421,11 +601,15 @@ class PluginManifest {
         if (license != null && license!.isNotEmpty) 'license': license,
         'permissions': permissions.toList(),
         if (themeOverrides != null) 'theme_overrides': themeOverrides,
-        if (uiExtensions != null)
-          'ui_extensions': uiExtensions!.map(
-            (key, value) =>
-                MapEntry(key, value.map((e) => e.toJson()).toList()),
-          ),
+        if (uiExtensions != null || pageExtensions.isNotEmpty)
+          'ui_extensions': <String, dynamic>{
+            if (uiExtensions != null)
+              for (final entry in uiExtensions!.entries)
+                entry.key:
+                    entry.value.map((element) => element.toJson()).toList(),
+            if (pageExtensions.isNotEmpty)
+              'pages': pageExtensions.map((page) => page.toJson()).toList(),
+          },
         if (sidebarPlacement != PluginSidebarPlacement.bottom)
           'sidebar_placement': _sidebarPlacementToString(sidebarPlacement),
       };
@@ -522,6 +706,28 @@ class PluginManifest {
       }
     }
     errors.addAll(_validateUiExtensions());
+    errors.addAll(_validatePageExtensions());
+    return errors;
+  }
+
+  List<String> _validatePageExtensions() {
+    final errors = <String>[];
+    final pageIds = <String>{};
+    final replacedPages = <String>{};
+    for (final page in pageExtensions) {
+      errors.addAll(page.validate('ui_extensions.pages'));
+      if (page.id.trim().isNotEmpty && !pageIds.add(page.id)) {
+        errors.add('ui_extensions.pages contains duplicate id: ${page.id}');
+      }
+      final replaces = page.replaces;
+      if (replaces != null &&
+          PluginPageExtension.replaceableBuiltInPages.contains(replaces) &&
+          !replacedPages.add(replaces)) {
+        errors.add(
+          'ui_extensions.pages declares multiple replacements for "$replaces"',
+        );
+      }
+    }
     return errors;
   }
 

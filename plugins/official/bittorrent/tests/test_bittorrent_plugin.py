@@ -149,6 +149,49 @@ class BitTorrentServiceTests(unittest.TestCase):
         self.assertEqual(result["pluginData"]["gid"], "data-gid")
         self.assertEqual(result["pluginData"]["rootGid"], "root-gid")
 
+    def test_status_reports_peers_and_seeders_while_downloading(self):
+        def handler(method, params):
+            return {
+                "gid": "gid-1",
+                "status": "active",
+                "totalLength": "1000",
+                "completedLength": "250",
+                "downloadSpeed": "100",
+                "connections": "7",
+                "numSeeders": "3",
+                "bittorrent": {"info": {"name": "Example"}},
+            }
+
+        service = BitTorrentService(lambda: FakeClient(handler))
+        result = service.status({"pluginData": {"gid": "gid-1"}})
+
+        self.assertEqual(result["peerCount"], 7)
+        self.assertEqual(result["seeders"], 3)
+        self.assertEqual(result["statusDetail"], "7 peers · 3 seeds")
+
+    def test_magnet_metadata_phase_does_not_report_metadata_as_the_payload(self):
+        def handler(method, params):
+            return {
+                "gid": "meta-gid",
+                "status": "active",
+                # aria2 reports the size of the .torrent metadata here, not the
+                # size of the files the user asked for.
+                "totalLength": "31232",
+                "completedLength": "8192",
+                "downloadSpeed": "512",
+                "connections": "4",
+                "bittorrent": {"announceList": []},
+            }
+
+        service = BitTorrentService(lambda: FakeClient(handler))
+        result = service.status({"pluginData": {"gid": "meta-gid"}})
+
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["totalSize"], 0)
+        self.assertEqual(result["downloadedSize"], 0)
+        self.assertEqual(result["progress"], 0.0)
+        self.assertEqual(result["statusDetail"], "fetching metadata · 4 peers")
+
     def test_missing_status_becomes_terminal_failure(self):
         def handler(method, params):
             raise Aria2RpcError(1, "GID abc is not found")
@@ -238,6 +281,55 @@ class BackendProviderTests(unittest.TestCase):
             self.assertTrue((executable.parent / "COPYING").is_file())
             self.assertFalse((executable.parent / "unexpected.dll").exists())
 
+    def test_generated_config_unblocks_peer_discovery(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            provider = Aria2BackendProvider(
+                plugin_dir=PLUGIN_DIR,
+                data_dir=root,
+                log_dir=root / "logs",
+                environ={},
+            )
+            (root / "logs").mkdir()
+            with patch(
+                "bittorrent_plugin.subprocess.Popen",
+                side_effect=OSError("not launched"),
+            ):
+                with self.assertRaises(PluginFailure):
+                    provider._start_managed(Path("aria2c.exe"), {})
+            content = (root / "aria2.conf").read_text(encoding="utf-8")
+
+        # aria2 defaults bt-request-peer-speed-limit to 50K and stops looking
+        # for peers above it, which is the single biggest reason torrents crawl.
+        self.assertIn("bt-request-peer-speed-limit=50M", content)
+        self.assertIn("enable-dht=true", content)
+        self.assertIn("bt-enable-lpd=true", content)
+        self.assertIn("enable-peer-exchange=true", content)
+        self.assertIn("bt-load-saved-metadata=true", content)
+        self.assertIn("bt-tracker=udp://tracker.opentrackr.org:1337/announce,", content)
+
+    def test_tracker_list_merges_extras_and_drops_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            provider = Aria2BackendProvider(
+                plugin_dir=PLUGIN_DIR,
+                data_dir=Path(temporary),
+                log_dir=Path(temporary) / "logs",
+                environ={},
+            )
+            merged = provider._tracker_list(
+                {"extraTrackers": ["udp://extra.invalid:1337/announce"]}
+            )
+            replaced = provider._tracker_list(
+                {
+                    "useDefaultTrackers": False,
+                    "trackers": "udp://only.invalid:80/announce, udp://only.invalid:80/announce",
+                }
+            )
+
+        self.assertIn("udp://extra.invalid:1337/announce", merged)
+        self.assertIn("udp://tracker.opentrackr.org:1337/announce", merged)
+        self.assertEqual(replaced, ["udp://only.invalid:80/announce"])
+
     def test_invalid_config_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             Path(temporary, "config.json").write_text("[]", encoding="utf-8")
@@ -248,6 +340,64 @@ class BackendProviderTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(PluginFailure, "must contain an object"):
                 provider.client()
+
+
+class SettingsTests(unittest.TestCase):
+    def provider(self, root: Path) -> Aria2BackendProvider:
+        return Aria2BackendProvider(
+            plugin_dir=PLUGIN_DIR,
+            data_dir=root,
+            log_dir=root / "logs",
+            environ={},
+        )
+
+    def test_settings_merge_into_config_and_ignore_unknown_controls(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "config.json").write_text(
+                json.dumps({"rpcUrl": "", "aria2cPath": "C:/tools/aria2c.exe"}),
+                encoding="utf-8",
+            )
+
+            result = self.provider(root).apply_settings({
+                "useDefaultTrackers": False,
+                "trackers": " udp://one.invalid:80/announce ",
+                "maxConcurrentDownloads": 99,
+                "unrelatedControl": "ignored",
+            })
+            stored = json.loads((root / "config.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(stored["aria2cPath"], "C:/tools/aria2c.exe")
+        self.assertFalse(stored["useDefaultTrackers"])
+        self.assertEqual(stored["trackers"], "udp://one.invalid:80/announce")
+        # 滑块上限是 10，越界的值应被夹紧而不是原样写入
+        self.assertEqual(stored["maxConcurrentDownloads"], 10)
+        self.assertNotIn("unrelatedControl", stored)
+        self.assertTrue(result["restartRequired"])
+
+    def test_applied_settings_reach_the_generated_aria2_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            provider = self.provider(root)
+            (root / "logs").mkdir()
+            provider.apply_settings({
+                "useDefaultTrackers": False,
+                "trackers": "udp://only.invalid:80/announce",
+                "maxConcurrentDownloads": 3,
+            })
+            with patch(
+                "bittorrent_plugin.subprocess.Popen",
+                side_effect=OSError("not launched"),
+            ):
+                with self.assertRaises(PluginFailure):
+                    provider._start_managed(
+                        Path("aria2c.exe"), provider._load_config()
+                    )
+            content = (root / "aria2.conf").read_text(encoding="utf-8")
+
+        self.assertIn("max-concurrent-downloads=3", content)
+        self.assertIn("bt-tracker=udp://only.invalid:80/announce\n", content)
+        self.assertNotIn("tracker.opentrackr.org", content)
 
 
 class Aria2ClientTests(unittest.TestCase):

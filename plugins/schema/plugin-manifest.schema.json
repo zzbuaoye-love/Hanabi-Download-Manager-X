@@ -370,6 +370,110 @@
       ],
       "additionalProperties": false
     },
+    "uiPage": {
+      "type": "object",
+      "required": [
+        "id",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
+          "description": "同一插件内唯一的页面 ID。"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "侧边栏与页面头部显示的标题。"
+        },
+        "icon": {
+          "type": "string",
+          "description": "fluent:<name> 或插件目录内的相对图片路径。"
+        },
+        "replaces": {
+          "enum": [
+            "completed"
+          ],
+          "description": "要替换的内置页面 ID。当前仅允许 completed。"
+        },
+        "placement": {
+          "enum": [
+            "top",
+            "bottom"
+          ],
+          "description": "独立页面的侧边栏位置，默认 bottom。"
+        },
+        "position": {
+          "enum": [
+            "top",
+            "bottom"
+          ]
+        },
+        "elements": {
+          "$ref": "#/$defs/uiExtensionList"
+        },
+        "items": {
+          "$ref": "#/$defs/uiExtensionList"
+        },
+        "controls": {
+          "$ref": "#/$defs/uiExtensionList"
+        },
+        "provider": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]*$",
+          "description": "返回 {\"elements\": [...]} 的插件方法，用于动态内容。"
+        },
+        "refresh_seconds": {
+          "type": "integer",
+          "description": "provider 自动刷新间隔。0 关闭，或 5-3600 秒。",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 5,
+              "maximum": 3600
+            }
+          ]
+        },
+        "refreshSeconds": {
+          "type": "integer",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 5,
+              "maximum": 3600
+            }
+          ]
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "elements"
+          ]
+        },
+        {
+          "required": [
+            "items"
+          ]
+        },
+        {
+          "required": [
+            "controls"
+          ]
+        },
+        {
+          "required": [
+            "provider"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
     "uiExtensions": {
       "type": "object",
       "properties": {
@@ -392,6 +496,13 @@
               "$ref": "#/$defs/uiExtensionGroup"
             }
           ]
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uiPage"
+          },
+          "description": "插件页面：独立侧边栏页面或替换内置页面。"
         }
       },
       "additionalProperties": true

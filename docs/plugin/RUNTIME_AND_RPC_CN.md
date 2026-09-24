@@ -190,6 +190,26 @@ Hanabi API v1 使用“单次进程 + 单次 JSON-RPC 请求”模型。每次�
 - 宿主会把退出码、`stdout` 和 `stderr` 追加到 `runtime.log`。
 - 宿主从 `stdout` 的最后一条非空 JSON 行解析响应；前面的普通输出虽然可能兼容，但不应依赖。
 
+> [!IMPORTANT]
+> **响应必须以 UTF-8 编码写入 `stdout`。** 宿主固定按 UTF-8 解码，不会回退到本地编码。
+>
+> Python 的 `print()` 走 `sys.stdout` 的本地编码，在中文 Windows 上是 GBK：
+> 响应里只要出现一个非 ASCII 字符（一个中文文件名就够了），宿主解码就会失败，
+> 表现为「插件没有返回 JSON-RPC 响应」，而不是一个可读的错误。开发机上常设的
+> `PYTHONIOENCODING=utf-8` 会掩盖这个问题，正式环境没有该变量。
+>
+> 正确写法是绕开文本层直接写字节：
+>
+> ```python
+> sys.stdout.flush()
+> sys.stdout.buffer.write(json.dumps(response, ensure_ascii=False).encode("utf-8"))
+> sys.stdout.buffer.write(b"\n")
+> sys.stdout.buffer.flush()
+> ```
+>
+> 随包 SDK（`plugins/sdk/python/hanabi_plugin.py`）已经这样处理，直接使用即可。
+> 另一种同样安全的做法是 `ensure_ascii=True`，让输出退化为纯 ASCII。
+
 ## 持久状态
 
 插件进程不会跨调用保留内存状态。使用以下方式持久化：

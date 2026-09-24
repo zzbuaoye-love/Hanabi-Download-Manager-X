@@ -75,5 +75,5 @@ Hanabi
 
 ## 官方实现
 
-- [Hanabi BitTorrent](../../plugins/official/bittorrent/README_CN.md)：磁力链接与 `.torrent` 文件下载。
+- [Hanabi BitTorrent](../../plugins/official/bittorrent/README_CN.md)：当前不可正常使用，暂不建议安装。
 - [Hanabi ED2K](../../plugins/official/ed2k/README_CN.md)：ED2K 文件链接下载。

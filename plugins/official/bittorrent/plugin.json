@@ -4,9 +4,9 @@
   "apiVersion": "1.0",
   "id": "hanabi.official.bittorrent",
   "name": "Hanabi BitTorrent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Hanabi Download Manager X",
-  "description": "Official BitTorrent download support for magnet links and torrent files, powered by an isolated aria2 backend.",
+  "description": "Experimental BitTorrent plugin; magnet and torrent downloads currently do not work reliably.",
   "category": "download",
   "entry": "main.py",
   "homepage": "https://github.com/buaoyezz/Hanabi-Download-Manager-X/tree/main/plugins/official/bittorrent",
@@ -25,5 +25,50 @@
   "minAppVersion": "1.5.0",
   "runtime": {
     "timeoutSeconds": 90
+  },
+  "ui_extensions": {
+    "settings": [
+      {
+        "type": "text",
+        "id": "peer_hint",
+        "label": "连接与 Tracker",
+        "description": "磁力链接自带的 Tracker 往往很少，公共 Tracker 与 DHT 决定了冷启动能多快找到 peer。"
+      },
+      {
+        "type": "switch",
+        "id": "useDefaultTrackers",
+        "label": "使用内置公共 Tracker 列表",
+        "description": "私有 Tracker 的种子不需要，可以关闭。",
+        "default": true
+      },
+      {
+        "type": "text_input",
+        "id": "trackers",
+        "label": "额外 Tracker",
+        "description": "多个地址用逗号或换行分隔。",
+        "placeholder": "udp://tracker.example.org:1337/announce"
+      },
+      {
+        "type": "slider",
+        "id": "maxConcurrentDownloads",
+        "label": "同时下载的种子数",
+        "min": 1,
+        "max": 10,
+        "divisions": 9,
+        "default": 5
+      },
+      {
+        "type": "switch",
+        "id": "autoInstallEngine",
+        "label": "缺少 aria2 时自动安装",
+        "default": true
+      },
+      {
+        "type": "button",
+        "id": "restart_engine",
+        "label": "重启 aria2 后端以应用改动",
+        "action": "bittorrent.engine.restart"
+      }
+    ]
   }
 }

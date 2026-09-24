@@ -1,6 +1,6 @@
 # UI 扩展
 
-插件可以通过 `ui_extensions` 声明设置页和侧边栏。控件由 Hanabi 渲染，插件不能注入 Flutter 代码。
+插件可以通过 `ui_extensions` 声明设置页、侧边栏和插件页面。控件由 Hanabi 渲染，插件不能注入 Flutter 代码。
 
 ## 挂载点
 
@@ -8,6 +8,7 @@
 | --- | --- |
 | `settings` | 插件管理页中的设置对话框。 |
 | `sidebar` | 插件启用后出现的独立侧边栏页面。 |
+| `pages` | 具名插件页面：独立的侧边栏入口，或替换白名单内的内置页面。 |
 
 ## 设置页示例
 
@@ -104,6 +105,95 @@
 | `top` | 下载中、已完成等主导航区域。 |
 | `bottom` | 插件、设置、关于等工具区域。默认值。 |
 
+## 插件页面（pages）
+
+`pages` 是页面对象数组。每个页面要么作为独立侧边栏入口出现，要么通过 `replaces` 替换内置页面。
+
+独立页面：
+
+```json
+{
+  "ui_extensions": {
+    "pages": [
+      {
+        "id": "dashboard",
+        "title": "远程面板",
+        "icon": "fluent:cloud",
+        "placement": "top",
+        "provider": "aria2.dashboard.render",
+        "refresh_seconds": 10,
+        "elements": [
+          {"type": "text", "id": "loading", "label": "正在加载…"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+替换内置"已完成"页面：
+
+```json
+{
+  "ui_extensions": {
+    "pages": [
+      {
+        "id": "history",
+        "title": "下载历史",
+        "replaces": "completed",
+        "provider": "history.page.render"
+      }
+    ]
+  }
+}
+```
+
+### 页面字段
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `id` | string | 是 | 插件内唯一，格式同插件 ID（小写字母、数字、`._-`）。 |
+| `title` | string | 是 | 侧边栏与页面头部标题。 |
+| `icon` | string | 否 | `fluent:<name>` 或插件目录内的相对图片路径。 |
+| `replaces` | string | 否 | 要替换的内置页面 ID。白名单当前仅 `completed`。 |
+| `placement` | string | 否 | 独立页面的侧边栏位置，`top` 或 `bottom`（默认）。替换页面忽略此字段。 |
+| `elements` | array | 二选一 | 静态控件列表，同 `sidebar` 控件格式。 |
+| `provider` | string | 二选一 | 返回动态控件的插件方法名。`elements` 与 `provider` 至少声明一个。 |
+| `refresh_seconds` | integer | 否 | provider 自动刷新间隔。`0`（默认）关闭，或 `5`-`3600` 秒；需要同时声明 `provider`。 |
+
+规则：
+
+- 同一插件内页面 `id` 不能重复，`replaces` 同一内置页面不能声明两次。
+- 多个启用的插件替换同一内置页面时，`priority` 最高者生效，其余插件的该页面被忽略。
+- 声明了 `provider` 时，`elements` 作为加载中或失败时的回退内容。
+
+### provider 协议
+
+宿主调用 `provider` 指定的方法获取动态内容，`params` 为：
+
+```json
+{
+  "page": "history",
+  "replaces": "completed",
+  "state": {"filter": "all"},
+  "context": {"completedCount": 3, "completedTasks": [{"id": "…"}]}
+}
+```
+
+- `replaces` 仅在替换页面时存在。
+- `state` 是该页面当前持久化的控件状态。
+- `context` 是宿主注入的上下文数据；仅 `replaces: "completed"` 时包含 `completedCount` 与 `completedTasks`（最多 200 条，字段：`id`、`url`、`fileName`、可选 `fileSize`、`filePath`、`endTime`、`averageSpeed`）。其他页面为空对象。
+
+方法必须返回：
+
+```json
+{"elements": [{"type": "text", "id": "row1", "label": "示例"}]}
+```
+
+`elements` 数组使用与 `sidebar` 相同的控件格式。返回其他形状会显示错误并回退到清单中的静态 `elements`。
+
+页面上的按钮点击时，宿主调用按钮 `action` 指定的方法，`params` 为 `{"page": "<id>", "state": {…}, "context": {…}}`；动作完成后若声明了 `provider`，宿主会自动重新调用它刷新内容。控件状态变化会调用 `onPageStateChanged` 通知（`params` 为 `{"page": "<id>", "state": {…}}`）。页面状态按 `<plugin-id>_page_<page-id>` 命名空间独立持久化。
+
 ## 控件类型
 
 | `type` | 用途 | 关键字段 | 状态值 |
@@ -197,8 +287,8 @@ onSidebarStateChanged
 ## 限制
 
 - 不支持任意 HTML、WebView 或 Flutter Widget 注入。
-- 不支持控件条件显示、动态列表或运行时修改 Schema。
-- 不支持插件自定义页面路由。
+- `settings` 和 `sidebar` 不支持控件条件显示、动态列表或运行时修改 Schema；动态内容仅限 `pages` 的 `provider` 机制。
+- 内置页面替换仅限白名单（当前为 `completed`），不支持替换其他页面或注入任意路由。
 - 不支持把动作结果自动转换成通知或表单校验错误。
 
 这些限制保证插件 UI 可控、可升级，并与宿主主题和无障碍能力一致。

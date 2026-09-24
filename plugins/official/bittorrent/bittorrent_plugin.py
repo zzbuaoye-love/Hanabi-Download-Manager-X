@@ -57,6 +57,34 @@ STATUS_KEYS = [
     "errorMessage",
 ]
 
+# Magnet links carry few or no trackers, and a cold DHT can take minutes to
+# return usable peers. Seeding well-known open trackers is what makes a magnet
+# start in seconds instead of sitting at 0 B.
+DEFAULT_TRACKERS = (
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "http://tracker.openbittorrent.com:80/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://exodus.desync.com:6969/announce",
+    "udp://tracker.dler.org:6969/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://opentracker.i2p.rocks:6969/announce",
+    "udp://tracker.internetwarriors.net:1337/announce",
+    "udp://9.rarbg.com:2810/announce",
+    "udp://tracker1.bt.moack.co.kr:80/announce",
+    "udp://tracker.moeking.me:6969/announce",
+    "udp://tracker.bittor.pw:1337/announce",
+    "udp://retracker01-msk-virt.corbina.net:80/announce",
+    "udp://bt1.archive.org:6969/announce",
+    "udp://bt2.archive.org:6969/announce",
+)
+
+# aria2 accepts a single DHT entry point; once dht.dat exists it bootstraps
+# from the saved routing table instead.
+DHT_ENTRY_POINT = "router.bittorrent.com:6881"
+
 
 class PluginFailure(RuntimeError):
     def __init__(
@@ -254,6 +282,100 @@ class Aria2BackendProvider:
             return False
         return fallback
 
+    # 宿主设置页声明的控件 ID -> config.json 的键与类型。
+    SETTINGS_SCHEMA: Mapping[str, str] = {
+        "useDefaultTrackers": "bool",
+        "trackers": "text",
+        "maxConcurrentDownloads": "int",
+        "autoInstallEngine": "bool",
+    }
+
+    def apply_settings(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+        """Merge host settings into config.json without touching other keys."""
+        config = self._load_config()
+        applied: dict[str, Any] = {}
+        for key, kind in self.SETTINGS_SCHEMA.items():
+            if key not in settings:
+                continue
+            raw = settings[key]
+            if kind == "bool":
+                value: Any = _coerce_bool(raw)
+            elif kind == "int":
+                value = _bounded_int(raw, 5, 1, 10)
+            else:
+                value = str(raw or "").strip()
+            if value is None:
+                continue
+            config[key] = value
+            applied[key] = value
+
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(self.data_dir / "config.json", config)
+        return {
+            "applied": applied,
+            # aria2.conf 只在启动时写入并读取。
+            "restartRequired": bool(applied),
+        }
+
+    def restart_engine(self) -> dict[str, Any]:
+        """Shut the managed aria2 down so the next call rebuilds aria2.conf.
+
+        aria2 saves its session on exit, so unfinished torrents resume with the
+        new configuration instead of being lost.
+        """
+        stopped = False
+        client = self._managed_client()
+        if client is not None:
+            try:
+                client.call("aria2.shutdown")
+                stopped = True
+            except PluginFailure:
+                try:
+                    client.call("aria2.forceShutdown")
+                    stopped = True
+                except PluginFailure:
+                    stopped = False
+        state_path = self.data_dir / "managed-runtime.json"
+        if stopped:
+            for _ in range(20):
+                self.sleep(0.1)
+                if self._managed_client() is None:
+                    break
+            state_path.unlink(missing_ok=True)
+
+        restarted = False
+        try:
+            self.client()
+            restarted = True
+        except PluginFailure:
+            restarted = False
+        return {"stopped": stopped, "restarted": restarted}
+
+    def _tracker_list(self, config: Mapping[str, Any]) -> list[str]:
+        """Resolve the announce list: replace the defaults, or add to them."""
+        if not self._bool_setting(
+            "ARIA2_DEFAULT_TRACKERS", config, "useDefaultTrackers", True
+        ):
+            base: list[str] = []
+        else:
+            base = list(DEFAULT_TRACKERS)
+        environment_trackers = self.environ.get("ARIA2_BT_TRACKERS")
+        base.extend(
+            _split_trackers(
+                environment_trackers
+                if environment_trackers is not None
+                else config.get("trackers")
+            )
+        )
+        base.extend(_split_trackers(config.get("extraTrackers")))
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for tracker in base:
+            if tracker and tracker not in seen:
+                seen.add(tracker)
+                ordered.append(tracker)
+        return ordered
+
     def _managed_client(self) -> Aria2Client | None:
         state_path = self.data_dir / "managed-runtime.json"
         if not state_path.exists():
@@ -391,6 +513,7 @@ class Aria2BackendProvider:
         session_path = self.data_dir / "aria2.session"
         session_path.touch(exist_ok=True)
         aria2_config = self.data_dir / "aria2.conf"
+        trackers = self._tracker_list(config)
         config_lines = [
             "enable-rpc=true",
             "rpc-listen-all=false",
@@ -401,8 +524,11 @@ class Aria2BackendProvider:
             "auto-file-renaming=true",
             "file-allocation=none",
             "seed-time=0",
+            "bt-detach-seed-only=true",
             "bt-save-metadata=true",
+            "bt-load-saved-metadata=true",
             "bt-metadata-only=false",
+            "rpc-save-upload-metadata=true",
             "save-session-interval=30",
             "auto-save-interval=30",
             "max-download-result=1000",
@@ -410,9 +536,32 @@ class Aria2BackendProvider:
             "summary-interval=0",
             "console-log-level=warn",
             "rpc-max-request-size=16M",
+            # aria2 stops asking trackers and the DHT for more peers once a
+            # torrent exceeds bt-request-peer-speed-limit, which defaults to
+            # 50K. That single default is why aria2 torrents crawl compared to
+            # a desktop client, so the cap is raised out of the way.
+            "bt-request-peer-speed-limit=50M",
+            "bt-max-peers=0",
+            "enable-dht=true",
+            "enable-dht6=false",
+            "bt-enable-lpd=true",
+            "enable-peer-exchange=true",
+            "listen-port=6881-6999",
+            "dht-listen-port=6881-6999",
+            f"dht-file-path={(self.data_dir / 'dht.dat').as_posix()}",
+            f"dht-entry-point={DHT_ENTRY_POINT}",
+            f"max-concurrent-downloads="
+            f"{_bounded_int(config.get('maxConcurrentDownloads'), 5, 1, 10)}",
+            "max-connection-per-server=16",
+            "min-split-size=4M",
+            "split=16",
+            "disk-cache=64M",
+            "content-disposition-default-utf8=true",
             f"input-file={session_path.as_posix()}",
             f"save-session={session_path.as_posix()}",
         ]
+        if trackers:
+            config_lines.append(f"bt-tracker={','.join(trackers)}")
         aria2_config.write_text("\n".join(config_lines) + "\n", encoding="utf-8")
 
         log_path = self.log_dir / "aria2.log"
@@ -576,11 +725,22 @@ class BitTorrentService:
                 }
             raise
 
-        total = _integer(raw.get("totalLength"))
-        completed = _integer(raw.get("completedLength"))
-        speed = _integer(raw.get("downloadSpeed"))
+        aria_status = str(raw.get("status") or "")
+        peers = _integer(raw.get("connections"))
+        seeders = _integer(raw.get("numSeeders"))
+        # While a magnet is still resolving, totalLength/completedLength track
+        # the torrent metadata, not the payload. Reporting those would show a
+        # few kilobytes as the file size and a progress bar that resets.
+        fetching_metadata = _is_metadata_phase(raw)
+        total = 0 if fetching_metadata else _integer(raw.get("totalLength"))
+        completed = 0 if fetching_metadata else _integer(raw.get("completedLength"))
+        speed = 0 if fetching_metadata else _integer(raw.get("downloadSpeed"))
         progress = completed / total if total > 0 else 0.0
-        status = _map_status(str(raw.get("status") or ""), total)
+        status = (
+            "pending"
+            if fetching_metadata and aria_status in {"active", "waiting"}
+            else _map_status(aria_status, total)
+        )
         return {
             "status": status,
             "totalSize": total,
@@ -589,9 +749,12 @@ class BitTorrentService:
             "progress": max(0.0, min(progress, 1.0)),
             "filePath": _download_path(raw),
             "error": str(raw.get("errorMessage") or ""),
-            "uploadSpeed": _integer(raw.get("uploadSpeed")),
-            "peerCount": _integer(raw.get("connections")),
-            "seeders": _integer(raw.get("numSeeders")),
+            "uploadSpeed": 0 if fetching_metadata else _integer(raw.get("uploadSpeed")),
+            "peerCount": peers,
+            "seeders": seeders,
+            "statusDetail": _status_detail(
+                aria_status, fetching_metadata, peers, seeders
+            ),
             "pluginData": _plugin_data(gid, root_gid),
         }
 
@@ -618,6 +781,19 @@ class BitTorrentService:
         else:
             status = _map_status(aria_status, _integer(raw.get("totalLength")))
         return {"status": status, "pluginData": _plugin_data(gid, root_gid)}
+
+    def apply_settings(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+        return self._require_provider().apply_settings(settings)
+
+    def restart_engine(self) -> dict[str, Any]:
+        return self._require_provider().restart_engine()
+
+    def _require_provider(self) -> Aria2BackendProvider:
+        if self._provider is None:
+            raise PluginFailure(
+                -32020, "Settings are only available with the managed backend"
+            )
+        return self._provider
 
     def remove(self, params: Mapping[str, Any]) -> dict[str, Any]:
         original_gid, root_gid = _task_identity(params)
@@ -715,6 +891,29 @@ def _map_status(status: str, total_size: int) -> str:
     }.get(status, "pending")
 
 
+def _is_metadata_phase(raw: Mapping[str, Any]) -> bool:
+    bittorrent = raw.get("bittorrent")
+    if not isinstance(bittorrent, Mapping):
+        return False
+    info = bittorrent.get("info")
+    return not (isinstance(info, Mapping) and str(info.get("name") or "").strip())
+
+
+def _status_detail(
+    aria_status: str,
+    fetching_metadata: bool,
+    peers: int,
+    seeders: int,
+) -> str:
+    if fetching_metadata:
+        return f"fetching metadata · {peers} peers"
+    if aria_status == "active":
+        return f"{peers} peers · {seeders} seeds"
+    if aria_status == "waiting":
+        return "queued"
+    return ""
+
+
 def _download_path(raw: Mapping[str, Any]) -> str:
     directory = str(raw.get("dir") or "").strip()
     bittorrent = raw.get("bittorrent")
@@ -747,6 +946,27 @@ def _is_missing_task(error: Aria2RpcError) -> bool:
         or "not exist" in message
         or "cannot be found" in message
     )
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _split_trackers(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        items = [str(item) for item in value]
+    else:
+        items = re.split(r"[,\s]+", str(value))
+    return [item.strip() for item in items if item.strip()]
 
 
 def _integer(value: Any) -> int:

@@ -118,7 +118,15 @@ plugin:<pluginId>:<backendId>
 | `downloadedSize` | `downloaded_size` | 字节。 |
 | `speed` | `downloadSpeed`、`download_speed` | 字节/秒。 |
 | `progress` | - | 推荐 `0.0` 至 `1.0`；大于 `1` 时按百分比处理。 |
+| `statusDetail` | `detail` | 一行说明文本，展示在进度条下方。 |
+| `peerCount` | `peer_count`、`peers` | 已连接的 peer / 源数量。 |
+| `seeders` | `seederCount`、`sources` | 做种者或已知源总数。 |
+| `uploadSpeed` | `upload_speed` | 字节/秒。 |
 | `pluginData` | `plugin_data` | 与已有数据合并后持久化。 |
+
+`statusDetail` 用来解释「等待中」这类没有进度的状态，例如 `fetching metadata · 4 peers`、
+`searching for sources · not connected to ed2k or Kad`。P2P 任务长时间没有进度是常态，
+把原因写进这个字段，用户才能判断是网络问题还是资源没人做种。
 
 ## 控制任务
 

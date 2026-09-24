@@ -112,7 +112,7 @@ class PluginProcessRunner {
 
     Process? process;
     try {
-      _diag.mark(
+      _diag.trace(
         'process.invoke.start',
         pluginId: plugin.id,
         data: <String, Object?>{
@@ -142,7 +142,7 @@ class PluginProcessRunner {
           'HANABI_REQUEST_METHOD': method,
         },
       );
-      _diag.mark(
+      _diag.trace(
         'process.started',
         pluginId: plugin.id,
         data: <String, Object?>{
@@ -157,7 +157,7 @@ class PluginProcessRunner {
 
       process.stdin.writeln(jsonEncode(request));
       await process.stdin.close();
-      _diag.mark(
+      _diag.trace(
         'process.stdin.closed',
         pluginId: plugin.id,
         data: <String, Object?>{'method': method, 'requestId': id},
@@ -183,7 +183,7 @@ class PluginProcessRunner {
       final stdout = await stdoutFuture;
       final stderr = await stderrFuture;
       await _appendLog(logFile, method, exitCode, stdout, stderr);
-      _diag.mark(
+      _diag.trace(
         'process.exited',
         pluginId: plugin.id,
         data: <String, Object?>{
@@ -272,7 +272,7 @@ class PluginProcessRunner {
         );
       }
 
-      _diag.mark(
+      _diag.trace(
         'process.invoke.success',
         pluginId: plugin.id,
         data: <String, Object?>{
@@ -444,6 +444,11 @@ class PluginProcessRunner {
     return null;
   }
 
+  /// 状态轮询每隔几秒就会调用一次插件，把每次的完整响应写进日志会让
+  /// runtime.log 无限增长，也是「等待中」时持续磁盘写入的来源之一。
+  /// 成功调用只留一行摘要，失败时才保留完整输出。
+  static const int _maxRuntimeLogBytes = 1024 * 1024;
+
   Future<void> _appendLog(
     File file,
     String method,
@@ -451,19 +456,39 @@ class PluginProcessRunner {
     String stdout,
     String stderr,
   ) async {
+    final failed = exitCode != 0 || stderr.trim().isNotEmpty;
     final buffer = StringBuffer()
-      ..writeln('[${DateTime.now().toIso8601String()}] $method exit=$exitCode');
-    if (stdout.trim().isNotEmpty) {
-      buffer
-        ..writeln('stdout:')
-        ..writeln(stdout.trimRight());
+      ..writeln('[${DateTime.now().toIso8601String()}] $method exit=$exitCode'
+          '${failed ? '' : ' bytes=${stdout.length}'}');
+    if (failed) {
+      if (stdout.trim().isNotEmpty) {
+        buffer
+          ..writeln('stdout:')
+          ..writeln(stdout.trimRight());
+      }
+      if (stderr.trim().isNotEmpty) {
+        buffer
+          ..writeln('stderr:')
+          ..writeln(stderr.trimRight());
+      }
     }
-    if (stderr.trim().isNotEmpty) {
-      buffer
-        ..writeln('stderr:')
-        ..writeln(stderr.trimRight());
-    }
+    await _rotateRuntimeLog(file);
     await file.writeAsString('${buffer.toString()}\n', mode: FileMode.append);
+  }
+
+  Future<void> _rotateRuntimeLog(File file) async {
+    try {
+      if (!await file.exists() || await file.length() < _maxRuntimeLogBytes) {
+        return;
+      }
+      final rotated = File('${file.path}.1');
+      if (await rotated.exists()) {
+        await rotated.delete();
+      }
+      await file.rename(rotated.path);
+    } catch (_) {
+      // 日志轮转失败不应影响插件调用。
+    }
   }
 
   String _tail(String value) {

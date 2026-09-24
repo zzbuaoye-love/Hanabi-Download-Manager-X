@@ -12,7 +12,9 @@ import '../../services/plugin_store_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/fluent_icons.dart' as custom_icons;
 import '../../widgets/animated_notifications.dart';
+import '../../widgets/fluent_interactions.dart';
 import '../../widgets/folder_picker_dialog.dart';
+import '../../widgets/scroll_edge_fade.dart';
 import '../../widgets/settings_components.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
 import 'plugin_settings_dialog.dart';
@@ -57,47 +59,50 @@ class _PluginStorePageState extends State<PluginStorePage> {
         title: _title,
         icon: custom_icons.FluentIcons.app_icon_default,
       ),
-      content: SmoothSingleChildScrollView(
-        config: SmoothScrollConfig.fast,
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1280),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildOverview(pluginService, storeService),
-                const SizedBox(height: 16),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final compact = constraints.maxWidth < 980;
-                    if (compact) {
-                      return Column(
+      content: ScrollEdgeFade(
+        child: SmoothSingleChildScrollView(
+          config: SmoothScrollConfig.fast,
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1280),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildOverview(pluginService, storeService),
+                  const SizedBox(height: 16),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 980;
+                      if (compact) {
+                        return Column(
+                          children: [
+                            _buildInstalledPanel(pluginService),
+                            const SizedBox(height: 16),
+                            _buildStorePanel(pluginService, storeService),
+                          ],
+                        );
+                      }
+
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildInstalledPanel(pluginService),
-                          const SizedBox(height: 16),
-                          _buildStorePanel(pluginService, storeService),
+                          Expanded(
+                            flex: 9,
+                            child: _buildInstalledPanel(pluginService),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            flex: 11,
+                            child:
+                                _buildStorePanel(pluginService, storeService),
+                          ),
                         ],
                       );
-                    }
-
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 9,
-                          child: _buildInstalledPanel(pluginService),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          flex: 11,
-                          child: _buildStorePanel(pluginService, storeService),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ],
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -223,17 +228,17 @@ class _PluginStorePageState extends State<PluginStorePage> {
       constraints: const BoxConstraints(minHeight: 58),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.48),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: AppTheme.borderSubtle.withValues(alpha: 0.5)),
+        color: AppTheme.subtleFillHover,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
       ),
       child: Row(
         children: [
           Container(
             width: 30,
             height: 30,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.13),
+              color: color.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(AppTheme.radiusSm),
             ),
             child: Icon(icon, size: 16, color: color),
@@ -357,154 +362,169 @@ class _PluginStorePageState extends State<PluginStorePage> {
         plugin.manifest.uiExtensions?['settings']?.isNotEmpty == true;
     final permissionLabels = plugin.manifest.permissions.toList();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: _itemDecoration(),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 520;
-          final titleBlock = Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _pluginIcon(
-                icon: custom_icons.FluentIcons.app_icon_default,
-                color: stateColor,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            plugin.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: FluentTheme.of(context)
-                                .typography
-                                .body
-                                ?.copyWith(
-                                  color: AppTheme.textPrimary,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700,
-                                ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: FluentInteractiveSurface(
+        // 不可点，但保留 WinUI 的 subtle hover —— 高亮铺满整张卡片
+        colors: FluentInteractionColors(
+          rest: AppTheme.subtleFillHover,
+          hovered: AppTheme.surfaceCardHover,
+          pressed: AppTheme.subtleFillPressed,
+        ),
+        border: Border.all(color: AppTheme.borderSubtle),
+        padding: const EdgeInsets.all(14),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 520;
+            final titleBlock = Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _pluginIcon(
+                  icon: custom_icons.FluentIcons.app_icon_default,
+                  color: stateColor,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              plugin.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: FluentTheme.of(context)
+                                  .typography
+                                  .body
+                                  ?.copyWith(
+                                    color: AppTheme.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
                           ),
-                        ),
-                        if (!compact) ...[
-                          const SizedBox(width: 10),
-                          _statusPill(_stateLabel(plugin), stateColor),
+                          if (!compact) ...[
+                            const SizedBox(width: 10),
+                            _statusPill(_stateLabel(plugin), stateColor),
+                          ],
                         ],
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${plugin.id} - v${plugin.version} - ${plugin.manifest.author}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          FluentTheme.of(context).typography.caption?.copyWith(
-                                color: AppTheme.textTertiary,
-                                fontSize: 12,
-                              ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-
-          final toggle = ToggleSwitch(
-            checked: plugin.enabled,
-            onChanged: plugin.state == PluginInstallState.invalid ||
-                    plugin.state == PluginInstallState.incompatible
-                ? null
-                : (value) => _setPluginEnabled(service, plugin, value),
-          );
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (compact) ...[
-                titleBlock,
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    _statusPill(_stateLabel(plugin), stateColor),
-                    const Spacer(),
-                    toggle,
-                  ],
-                ),
-              ] else
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: titleBlock),
-                    const SizedBox(width: 14),
-                    toggle,
-                  ],
-                ),
-              if (plugin.manifest.description.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  plugin.manifest.description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: FluentTheme.of(context).typography.caption?.copyWith(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
                       ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${plugin.id} - v${plugin.version} - ${plugin.manifest.author}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: FluentTheme.of(context)
+                            .typography
+                            .caption
+                            ?.copyWith(
+                              color: AppTheme.textTertiary,
+                              fontSize: 12,
+                            ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _plainPill(_getCategoryName(plugin.manifest.category)),
-                  ...plugin.manifest.capabilities.map(_plainPill),
-                  ...permissionLabels.map(_permissionPill),
+            );
+
+            final toggle = ToggleSwitch(
+              checked: plugin.enabled,
+              onChanged: plugin.state == PluginInstallState.invalid ||
+                      plugin.state == PluginInstallState.incompatible
+                  ? null
+                  : (value) => _setPluginEnabled(service, plugin, value),
+            );
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (compact) ...[
+                  titleBlock,
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      _statusPill(_stateLabel(plugin), stateColor),
+                      const Spacer(),
+                      toggle,
+                    ],
+                  ),
+                ] else
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: titleBlock),
+                      const SizedBox(width: 14),
+                      toggle,
+                    ],
+                  ),
+                if (plugin.manifest.description.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    plugin.manifest.description,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: FluentTheme.of(context).typography.caption?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                  ),
                 ],
-              ),
-              if (plugin.lastError != null && plugin.lastError!.isNotEmpty) ...[
                 const SizedBox(height: 10),
-                _messageStrip(
-                  icon: custom_icons.FluentIcons.warning,
-                  text: plugin.lastError!,
-                  color: AppTheme.statusError,
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _plainPill(_getCategoryName(plugin.manifest.category)),
+                    ...plugin.manifest.capabilities.map(_plainPill),
+                    ...permissionLabels.map(_permissionPill),
+                  ],
                 ),
-              ],
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _actionButton(
-                    icon: custom_icons.FluentIcons.folder_open,
-                    label: _isChinese ? '日志' : 'Logs',
-                    onPressed: () =>
-                        _openDirectory(service.pluginLogDir(plugin.id)),
-                  ),
-                  if (hasSettings)
-                    _actionButton(
-                      icon: custom_icons.FluentIcons.settings,
-                      label: _isChinese ? '设置' : 'Settings',
-                      onPressed: () => _openPluginSettings(context, plugin),
-                    ),
-                  _actionButton(
-                    icon: custom_icons.FluentIcons.delete,
-                    label: _isChinese ? '卸载' : 'Uninstall',
-                    danger: true,
-                    onPressed:
-                        _busy ? null : () => _uninstallPlugin(service, plugin),
+                if (plugin.lastError != null &&
+                    plugin.lastError!.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _messageStrip(
+                    icon: custom_icons.FluentIcons.warning,
+                    text: plugin.lastError!,
+                    color: AppTheme.statusError,
                   ),
                 ],
-              ),
-            ],
-          );
-        },
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    _actionButton(
+                      icon: custom_icons.FluentIcons.folder_open,
+                      label: _isChinese ? '日志' : 'Logs',
+                      subtle: true,
+                      onPressed: () =>
+                          _openDirectory(service.pluginLogDir(plugin.id)),
+                    ),
+                    if (hasSettings)
+                      _actionButton(
+                        icon: custom_icons.FluentIcons.settings,
+                        label: _isChinese ? '设置' : 'Settings',
+                        subtle: true,
+                        onPressed: () => _openPluginSettings(context, plugin),
+                      ),
+                    _actionButton(
+                      icon: custom_icons.FluentIcons.delete,
+                      label: _isChinese ? '卸载' : 'Uninstall',
+                      danger: true,
+                      subtle: true,
+                      onPressed: _busy
+                          ? null
+                          : () => _uninstallPlugin(service, plugin),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -651,13 +671,8 @@ class _PluginStorePageState extends State<PluginStorePage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border:
-            Border.all(color: AppTheme.borderSubtle.withValues(alpha: 0.45)),
-      ),
+      padding: const EdgeInsets.all(14),
+      decoration: _itemDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -824,142 +839,151 @@ class _PluginStorePageState extends State<PluginStorePage> {
         ? custom_icons.FluentIcons.download
         : custom_icons.FluentIcons.update_restore;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: _itemDecoration(),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < 540;
-          final details = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _pluginIcon(
-                    icon: custom_icons.FluentIcons.app_icon_default,
-                    color: entry.isInstallable
-                        ? AppTheme.accentPrimary
-                        : AppTheme.textTertiary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${entry.name} - v${entry.version}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              FluentTheme.of(context).typography.body?.copyWith(
-                                    color: AppTheme.textPrimary,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          entry.author.isEmpty
-                              ? entry.id
-                              : '${entry.author} - ${entry.id}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: FluentTheme.of(context)
-                              .typography
-                              .caption
-                              ?.copyWith(
-                                color: AppTheme.textTertiary,
-                                fontSize: 12,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (entry.description.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(
-                  entry.description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: FluentTheme.of(context).typography.caption?.copyWith(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                ),
-              ],
-              if (entry.changelog.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                _messageStrip(
-                  icon: custom_icons.FluentIcons.info,
-                  text: entry.changelog,
-                  color: AppTheme.statusInfo,
-                  maxLines: 2,
-                ),
-              ],
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  _plainPill(_getCategoryName(entry.category)),
-                  _plainPill(entry.channel),
-                  _statusPill(
-                    _reviewStatusLabel(entry.reviewStatus),
-                    entry.isPublished
-                        ? AppTheme.statusSuccess
-                        : AppTheme.statusError,
-                  ),
-                  if (entry.hasSignature)
-                    _statusPill(
-                      _isChinese ? '已签名' : 'Signed',
-                      AppTheme.statusSuccess,
-                    ),
-                  if (installedVersion != null)
-                    _statusPill(
-                      _isChinese
-                          ? '已安装 $installedVersion'
-                          : 'Installed $installedVersion',
-                      AppTheme.statusSuccess,
-                    ),
-                  ...entry.capabilities.map(_plainPill),
-                ],
-              ),
-            ],
-          );
-
-          final action = _actionButton(
-            icon: actionIcon,
-            label: actionLabel,
-            filled: true,
-            onPressed: _busy || !entry.isInstallable
-                ? null
-                : () => _installStoreEntry(context, entry),
-          );
-
-          if (compact) {
-            return Column(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: FluentInteractiveSurface(
+        colors: FluentInteractionColors(
+          rest: AppTheme.subtleFillHover,
+          hovered: AppTheme.surfaceCardHover,
+          pressed: AppTheme.subtleFillPressed,
+        ),
+        border: Border.all(color: AppTheme.borderSubtle),
+        padding: const EdgeInsets.all(14),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 540;
+            final details = Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                details,
-                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _pluginIcon(
+                      icon: custom_icons.FluentIcons.app_icon_default,
+                      color: entry.isInstallable
+                          ? AppTheme.accentPrimary
+                          : AppTheme.textTertiary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${entry.name} - v${entry.version}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: FluentTheme.of(context)
+                                .typography
+                                .body
+                                ?.copyWith(
+                                  color: AppTheme.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.author.isEmpty
+                                ? entry.id
+                                : '${entry.author} - ${entry.id}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: FluentTheme.of(context)
+                                .typography
+                                .caption
+                                ?.copyWith(
+                                  color: AppTheme.textTertiary,
+                                  fontSize: 12,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (entry.description.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    entry.description,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: FluentTheme.of(context).typography.caption?.copyWith(
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
+                  ),
+                ],
+                if (entry.changelog.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _messageStrip(
+                    icon: custom_icons.FluentIcons.info,
+                    text: entry.changelog,
+                    color: AppTheme.statusInfo,
+                    maxLines: 2,
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _plainPill(_getCategoryName(entry.category)),
+                    _plainPill(entry.channel),
+                    _statusPill(
+                      _reviewStatusLabel(entry.reviewStatus),
+                      entry.isPublished
+                          ? AppTheme.statusSuccess
+                          : AppTheme.statusError,
+                    ),
+                    if (entry.hasSignature)
+                      _statusPill(
+                        _isChinese ? '已签名' : 'Signed',
+                        AppTheme.statusSuccess,
+                      ),
+                    if (installedVersion != null)
+                      _statusPill(
+                        _isChinese
+                            ? '已安装 $installedVersion'
+                            : 'Installed $installedVersion',
+                        AppTheme.statusSuccess,
+                      ),
+                    ...entry.capabilities.map(_plainPill),
+                  ],
+                ),
+              ],
+            );
+
+            final action = _actionButton(
+              icon: actionIcon,
+              label: actionLabel,
+              filled: true,
+              onPressed: _busy || !entry.isInstallable
+                  ? null
+                  : () => _installStoreEntry(context, entry),
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  details,
+                  const SizedBox(height: 12),
+                  action,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: details),
+                const SizedBox(width: 14),
                 action,
               ],
             );
-          }
-
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: details),
-              const SizedBox(width: 14),
-              action,
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }
@@ -1050,33 +1074,29 @@ class _PluginStorePageState extends State<PluginStorePage> {
     );
   }
 
+  /// WinUI 3 卡面：与设置页/下载页统一 —— surfaceCard + 中性描边 + 圆角 4，页面内卡片不投影
   Widget _surface({
     required Widget child,
     EdgeInsetsGeometry padding = const EdgeInsets.all(16),
   }) {
-    final isDark = AppTheme.isDarkContext(context);
     return Container(
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: AppTheme.cardBackground(darkAlpha: 0.74, lightAlpha: 0.88),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(
-          color: isDark
-              ? AppTheme.borderSubtle.withValues(alpha: 0.60)
-              : AppTheme.borderSubtle.withValues(alpha: 0.32),
-        ),
-        boxShadow: isDark ? null : AppTheme.shadowSm,
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderDefault),
       ),
       child: child,
     );
   }
 
+  /// 卡片内的次级条目：subtle 填充，不再叠一层高对比描边
   BoxDecoration _itemDecoration() {
     return BoxDecoration(
-      color: AppTheme.bgLayer2.withValues(alpha: 0.48),
-      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-      border: Border.all(color: AppTheme.borderSubtle.withValues(alpha: 0.46)),
+      color: AppTheme.subtleFillHover,
+      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+      border: Border.all(color: AppTheme.borderSubtle),
     );
   }
 
@@ -1088,36 +1108,29 @@ class _PluginStorePageState extends State<PluginStorePage> {
     return Container(
       width: size,
       height: size,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.13),
+        color: color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Icon(icon, size: size * 0.48, color: color),
     );
   }
 
+  /// WinUI 3 组标题：卡片之外的 BodyStrong 文本，不用彩色竖条装饰
   Widget _groupLabel(String label) {
-    return Row(
-      children: [
-        Container(
-          width: 3,
-          height: 14,
-          decoration: BoxDecoration(
-            color: AppTheme.accentPrimary.withValues(alpha: 0.78),
-            borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: FluentTheme.of(context).typography.caption?.copyWith(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(left: 2),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: FluentTheme.of(context).typography.body?.copyWith(
+              color: AppTheme.textSecondary,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+      ),
     );
   }
 
@@ -1127,13 +1140,14 @@ class _PluginStorePageState extends State<PluginStorePage> {
     required Color color,
     int maxLines = 3,
   }) {
+    // WinUI InfoBar：语义底色 + 同色描边 + 左侧图标
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.09),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1164,12 +1178,7 @@ class _PluginStorePageState extends State<PluginStorePage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border:
-            Border.all(color: AppTheme.borderSubtle.withValues(alpha: 0.38)),
-      ),
+      decoration: _itemDecoration(),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1278,13 +1287,24 @@ class _PluginStorePageState extends State<PluginStorePage> {
     required VoidCallback? onPressed,
     bool filled = false,
     bool danger = false,
+    bool subtle = false,
   }) {
+    // 卡片内部的行内操作用 subtle 变体：少一层描边，避免"框套框套框"
+    if (subtle && !filled) {
+      return FluentSubtleButton(
+        icon: icon,
+        label: label,
+        accentColor: danger ? AppTheme.statusError : null,
+        onPressed: onPressed,
+      );
+    }
+
     final color = danger ? AppTheme.statusError : null;
     final child = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 14, color: color),
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         Text(
           label,
           style: color == null ? null : TextStyle(color: color),
@@ -1298,55 +1318,21 @@ class _PluginStorePageState extends State<PluginStorePage> {
     return Button(onPressed: onPressed, child: child);
   }
 
+  // 徽标统一走 WinUI InfoBadge 风格的 FluentChip：无描边、语义色淡底
   Widget _plainPill(String label) {
     final value = label.trim();
     if (value.isEmpty) {
       return const SizedBox.shrink();
     }
-    return _pill(
-      value,
-      AppTheme.bgLayer3.withValues(alpha: 0.58),
-      AppTheme.textSecondary,
-      AppTheme.borderSubtle.withValues(alpha: 0.5),
-    );
+    return FluentChip(label: value);
   }
 
   Widget _permissionPill(String label) {
-    return _pill(
-      label,
-      AppTheme.statusWarning.withValues(alpha: 0.10),
-      AppTheme.statusWarning,
-      AppTheme.statusWarning.withValues(alpha: 0.28),
-    );
+    return FluentChip(label: label, color: AppTheme.statusWarning);
   }
 
   Widget _statusPill(String label, Color color) {
-    return _pill(
-      label,
-      color.withValues(alpha: 0.12),
-      color,
-      color.withValues(alpha: 0.35),
-    );
-  }
-
-  Widget _pill(String label, Color background, Color textColor, Color border) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-        border: Border.all(color: border),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: FluentTheme.of(context).typography.caption?.copyWith(
-              color: textColor,
-              fontSize: 11,
-            ),
-      ),
-    );
+    return FluentChip(label: label, color: color);
   }
 
   Color _stateColor(InstalledPlugin plugin) {

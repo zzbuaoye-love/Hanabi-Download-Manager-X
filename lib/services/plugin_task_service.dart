@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,7 @@ import 'package:path/path.dart' as path;
 
 import '../models/download_intent.dart';
 import '../models/download_task.dart';
+import '../models/plugin_manifest.dart';
 import 'app_logger_service.dart';
 import 'plugin_lifecycle_service.dart';
 import 'plugin_process_runner.dart';
@@ -27,6 +29,10 @@ class PluginTaskRecord {
     this.speed,
     this.progress = 0,
     this.pluginData = const <String, dynamic>{},
+    this.statusDetail,
+    this.peerCount,
+    this.seederCount,
+    this.uploadSpeed,
   });
 
   final String id;
@@ -44,6 +50,10 @@ class PluginTaskRecord {
   final double? speed;
   final double progress;
   final Map<String, dynamic> pluginData;
+  final String? statusDetail;
+  final int? peerCount;
+  final int? seederCount;
+  final double? uploadSpeed;
 
   factory PluginTaskRecord.fromJson(Map<String, dynamic> json) {
     final pluginDataRaw = json['pluginData'];
@@ -67,6 +77,10 @@ class PluginTaskRecord {
       pluginData: pluginDataRaw is Map
           ? pluginDataRaw.map((key, value) => MapEntry(key.toString(), value))
           : const <String, dynamic>{},
+      statusDetail: json['statusDetail']?.toString(),
+      peerCount: (json['peerCount'] as num?)?.toInt(),
+      seederCount: (json['seederCount'] as num?)?.toInt(),
+      uploadSpeed: (json['uploadSpeed'] as num?)?.toDouble(),
     );
   }
 
@@ -86,6 +100,11 @@ class PluginTaskRecord {
         if (speed != null) 'speed': speed,
         'progress': progress,
         if (pluginData.isNotEmpty) 'pluginData': pluginData,
+        if (statusDetail != null && statusDetail!.isNotEmpty)
+          'statusDetail': statusDetail,
+        if (peerCount != null) 'peerCount': peerCount,
+        if (seederCount != null) 'seederCount': seederCount,
+        if (uploadSpeed != null) 'uploadSpeed': uploadSpeed,
       };
 
   Map<String, dynamic> toPluginJson() => {
@@ -123,6 +142,11 @@ class PluginTaskRecord {
           : _progressFromSizes(nextDownloadedSize, nextTotalSize) ?? progress,
       pluginData: nextPluginData,
       updatedAt: DateTime.now(),
+      statusDetail:
+          result['statusDetail']?.toString() ?? result['detail']?.toString(),
+      peerCount: _firstInt(result, ['peerCount', 'peer_count', 'peers']),
+      seederCount: _firstInt(result, ['seeders', 'seederCount', 'sources']),
+      uploadSpeed: _firstDouble(result, ['uploadSpeed', 'upload_speed']),
     );
   }
 
@@ -137,6 +161,10 @@ class PluginTaskRecord {
     double? speed,
     double? progress,
     Map<String, dynamic>? pluginData,
+    String? statusDetail,
+    int? peerCount,
+    int? seederCount,
+    double? uploadSpeed,
   }) {
     return PluginTaskRecord(
       id: id,
@@ -154,6 +182,10 @@ class PluginTaskRecord {
       speed: speed ?? this.speed,
       progress: progress ?? this.progress,
       pluginData: Map.unmodifiable(pluginData ?? this.pluginData),
+      statusDetail: statusDetail ?? this.statusDetail,
+      peerCount: peerCount ?? this.peerCount,
+      seederCount: seederCount ?? this.seederCount,
+      uploadSpeed: uploadSpeed ?? this.uploadSpeed,
     );
   }
 
@@ -171,6 +203,10 @@ class PluginTaskRecord {
       speed: speed,
       downloadCore: 'Plugin: $pluginId',
       createdAt: createdAt,
+      statusDetail: statusDetail,
+      peerCount: peerCount,
+      seederCount: seederCount,
+      uploadSpeed: uploadSpeed,
     );
   }
 
@@ -271,6 +307,7 @@ class PluginTaskService extends ChangeNotifier {
 
   late String _tasksPath;
   bool _initialized = false;
+  Future<List<PluginTaskRecord>>? _refreshInFlight;
 
   List<PluginTaskRecord> get records => List.unmodifiable(_records.values);
 
@@ -313,16 +350,83 @@ class PluginTaskService extends ChangeNotifier {
       saveDir: saveDir,
     ).mergePluginResult(pluginResult);
     _records[taskId] = initial;
+    _resetBackoff(taskId);
     await _save();
     notifyListeners();
     return initial;
   }
 
-  Future<List<PluginTaskRecord>> refreshActiveTasks() async {
+  /// 每次状态查询都要启动一个插件进程，串行执行时任务越多刷新越慢。
+  static const int _statusConcurrency = 4;
+  static const Duration _statusTimeout = Duration(seconds: 25);
+
+  /// 没有进展的任务按指数退避降低查询频率。
+  ///
+  /// P2P 任务停在「等待中」是常态，可能持续几十分钟。按 2 秒的轮询节奏
+  /// 一直启动 Python 进程，只会让 CPU 和磁盘持续忙碌而拿不到任何新信息。
+  static const Duration _minIdleBackoff = Duration(seconds: 4);
+  static const Duration _maxIdleBackoff = Duration(seconds: 30);
+
+  final Map<String, DateTime> _nextPollAt = <String, DateTime>{};
+  final Map<String, int> _idleRounds = <String, int>{};
+
+  /// 用户操作或任务重建后立刻恢复正常轮询节奏。
+  void _resetBackoff(String id) {
+    _nextPollAt.remove(id);
+    _idleRounds.remove(id);
+  }
+
+  void _backOff(String id) {
+    final rounds = (_idleRounds[id] ?? 0) + 1;
+    _idleRounds[id] = rounds;
+    var delay = _minIdleBackoff * (1 << (rounds - 1).clamp(0, 8));
+    if (delay > _maxIdleBackoff) {
+      delay = _maxIdleBackoff;
+    }
+    _nextPollAt[id] = DateTime.now().add(delay);
+  }
+
+  static bool _hasMeaningfulChange(
+    PluginTaskRecord before,
+    PluginTaskRecord after,
+  ) {
+    return before.status != after.status ||
+        before.downloadedSize != after.downloadedSize ||
+        before.totalSize != after.totalSize ||
+        (before.progress - after.progress).abs() > 0.0001 ||
+        before.error != after.error ||
+        before.statusDetail != after.statusDetail ||
+        before.peerCount != after.peerCount ||
+        before.seederCount != after.seederCount ||
+        before.uploadSpeed != after.uploadSpeed ||
+        !mapEquals(before.pluginData, after.pluginData);
+  }
+
+  Future<List<PluginTaskRecord>> refreshActiveTasks() {
+    final existing = _refreshInFlight;
+    if (existing != null) {
+      return existing;
+    }
+
+    late final Future<List<PluginTaskRecord>> tracked;
+    tracked = _refreshActiveTasksOnce().whenComplete(() {
+      if (identical(_refreshInFlight, tracked)) {
+        _refreshInFlight = null;
+      }
+    });
+    _refreshInFlight = tracked;
+    return tracked;
+  }
+
+  Future<List<PluginTaskRecord>> _refreshActiveTasksOnce() async {
     await ensureInitialized();
     var changed = false;
+    final now = DateTime.now();
+    final pending = <(PluginTaskRecord, InstalledPlugin)>[];
+
     for (final record in _records.values.toList(growable: false)) {
       if (!record.isActive) {
+        _resetBackoff(record.id);
         continue;
       }
       final plugin = _pluginService.getPlugin(record.pluginId);
@@ -335,31 +439,63 @@ class PluginTaskService extends ChangeNotifier {
         changed = true;
         continue;
       }
-
-      final result = await _runner.invoke(
-        plugin,
-        method: 'hanabi.download.status',
-        params: record.toPluginJson(),
-        timeout: const Duration(seconds: 10),
-      );
-      if (!result.success) {
-        _logger.warning(
-          'PluginTask',
-          'Plugin task status failed: ${record.id}: ${result.error}',
-        );
+      final nextPollAt = _nextPollAt[record.id];
+      if (nextPollAt != null && now.isBefore(nextPollAt)) {
         continue;
       }
-      if (result.result is Map) {
-        _records[record.id] = record.mergePluginResult(
-          (result.result as Map).map(
-            (key, value) => MapEntry(key.toString(), value),
-          ),
-        );
-        changed = true;
+      pending.add((record, plugin));
+    }
+
+    for (var start = 0; start < pending.length; start += _statusConcurrency) {
+      final batch = pending.skip(start).take(_statusConcurrency);
+      final results = await Future.wait(
+        batch.map((entry) async {
+          final (record, plugin) = entry;
+          return (
+            record,
+            await _runner.invoke(
+              plugin,
+              method: 'hanabi.download.status',
+              params: record.toPluginJson(),
+              timeout: _statusTimeout,
+            ),
+          );
+        }),
+      );
+
+      for (final (record, result) in results) {
+        if (!result.success) {
+          _logger.warning(
+            'PluginTask',
+            'Plugin task status failed: ${record.id}: ${result.error}',
+          );
+          // 后端不可用时更要退避，否则每 2 秒重试一次失败的进程启动。
+          _backOff(record.id);
+          continue;
+        }
+        // 记录可能在等待期间被移除
+        if (!_records.containsKey(record.id)) {
+          continue;
+        }
+        if (result.result is Map) {
+          final updated = record.mergePluginResult(
+            (result.result as Map).map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+          _records[record.id] = updated;
+          changed = true;
+          if (_hasMeaningfulChange(record, updated)) {
+            _resetBackoff(record.id);
+          } else {
+            _backOff(record.id);
+          }
+        }
       }
     }
+
     if (changed) {
-      await _save();
+      _scheduleSave();
       notifyListeners();
     }
     return records;
@@ -372,6 +508,7 @@ class PluginTaskService extends ChangeNotifier {
   Future<bool> removeTask(String id) async {
     final called = await _callTaskMethod(id, 'remove', keepRecord: false);
     _records.remove(id);
+    _resetBackoff(id);
     await _save();
     notifyListeners();
     return called;
@@ -411,6 +548,8 @@ class PluginTaskService extends ChangeNotifier {
           (key, value) => MapEntry(key.toString(), value),
         ),
       );
+      // 暂停/继续之后用户在等界面反馈，恢复正常轮询节奏。
+      _resetBackoff(id);
       await _save();
       notifyListeners();
     }
@@ -420,6 +559,18 @@ class PluginTaskService extends ChangeNotifier {
   Future<void> _load() async {
     _records.clear();
     final file = File(_tasksPath);
+    final backup = File('$_tasksPath.backup');
+    try {
+      if (!await file.exists() && await backup.exists()) {
+        await backup.rename(file.path);
+        _logger.warning(
+          'PluginTask',
+          'Recovered plugin tasks after an interrupted save',
+        );
+      }
+    } catch (e) {
+      _logger.warning('PluginTask', 'Could not recover task backup: $e');
+    }
     if (!await file.exists()) {
       return;
     }
@@ -441,14 +592,121 @@ class PluginTaskService extends ChangeNotifier {
     }
   }
 
-  Future<void> _save() async {
-    final file = File(_tasksPath);
-    await file.parent.create(recursive: true);
-    await file.writeAsString(
-      const JsonEncoder.withIndent('  ').convert({
-        'updatedAt': DateTime.now().toIso8601String(),
-        'tasks': _records.values.map((record) => record.toJson()).toList(),
-      }),
+  /// 轮询期间速度和来源数每次都在变，逐次落盘意味着每 2 秒重写一次
+  /// 整个任务文件。这里合并成固定节奏的一次写入。
+  static const Duration _saveDebounce = Duration(seconds: 5);
+  Timer? _saveTimer;
+  Future<void> _saveTail = Future<void>.value();
+
+  void _scheduleSave() {
+    _saveTimer ??= Timer(_saveDebounce, () {
+      _saveTimer = null;
+      unawaited(
+        _save().catchError((Object error, StackTrace stackTrace) {
+          _logger.error(
+            'PluginTask',
+            'Debounced plugin task save failed: $error',
+          );
+        }),
+      );
+    });
+  }
+
+  Future<void> _save() {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    final snapshot = const JsonEncoder.withIndent('  ').convert({
+      'updatedAt': DateTime.now().toIso8601String(),
+      'tasks': _records.values.map((record) => record.toJson()).toList(),
+    });
+
+    // Every writer joins one chain. This prevents a slow older snapshot from
+    // truncating or overwriting a newer one.
+    final write = _saveTail.then((_) => _writeSnapshot(snapshot));
+    _saveTail = write.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {
+        _logger.error('PluginTask', 'Plugin task save failed: $error');
+      },
     );
+    return write;
+  }
+
+  Future<void> _writeSnapshot(String snapshot) async {
+    final target = File(_tasksPath);
+    final staged = File('$_tasksPath.tmp');
+    final backup = File('$_tasksPath.backup');
+    await target.parent.create(recursive: true);
+
+    if (await staged.exists()) {
+      await staged.delete();
+    }
+    await staged.writeAsString(snapshot, flush: true);
+
+    var previousMoved = false;
+    try {
+      if (await backup.exists()) {
+        await backup.delete();
+      }
+      if (await target.exists()) {
+        await target.rename(backup.path);
+        previousMoved = true;
+      }
+      await staged.rename(target.path);
+      if (previousMoved && await backup.exists()) {
+        try {
+          await backup.delete();
+        } catch (e) {
+          _logger.warning(
+            'PluginTask',
+            'Could not remove old task backup: $e',
+          );
+        }
+      }
+    } catch (_) {
+      if (previousMoved && await backup.exists()) {
+        try {
+          if (await target.exists()) {
+            await target.delete();
+          }
+          await backup.rename(target.path);
+        } catch (rollbackError) {
+          _logger.error(
+            'PluginTask',
+            'Plugin task rollback failed: $rollbackError',
+          );
+        }
+      }
+      rethrow;
+    } finally {
+      try {
+        if (await staged.exists()) {
+          await staged.delete();
+        }
+      } catch (_) {
+        // A stale temp file is harmless and will be replaced by the next save.
+      }
+    }
+  }
+
+  /// Persists a pending debounced update and waits for earlier writes.
+  Future<void> flush() async {
+    final hasPendingDebounce = _saveTimer != null;
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    if (!_initialized) {
+      return;
+    }
+    if (hasPendingDebounce) {
+      await _save();
+    } else {
+      await _saveTail;
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(flush());
+    super.dispose();
   }
 }

@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'app_power_mode_service.dart';
 import 'client_config_service.dart';
 import 'integrated_download_service.dart';
+import 'kernel/next/server/http_server.dart';
 import 'popup_window_service.dart';
 import 'logger_service.dart';
 
@@ -12,10 +14,11 @@ import 'logger_service.dart';
 class DownloadListenerService {
   final BuildContext context;
   final _logger = LoggerService();
+  final _powerMode = AppPowerModeService();
   Timer? _pollTimer;
   bool _isChecking = false;
   bool _isShowingPopup = false; // 防止独立 popup 创建期间重复触发
-  bool _isBackgroundMode = false;
+  AppPowerMode _currentPowerMode = AppPowerModeService().mode;
 
   String? _lastPopupSignature;
   DateTime? _lastPopupOpenedAt;
@@ -28,19 +31,34 @@ class DownloadListenerService {
   // 开始监听下载请求
   void startListening() {
     _isStopped = false;
+    _currentPowerMode = _powerMode.mode;
+    _powerMode.addListener(_handlePowerModeChanged);
+    // 内核 HTTP 服务器就在本进程里，请求入队时直接叫醒我们，
+    // 于是轮询只承担兜底职责，降频不会拖慢浏览器接管。
+    NsfxHttpServer.addPendingPopupListener(_handlePendingPopupQueued);
     _logger.info('Download listener started');
     _scheduleNextCheck(const Duration(milliseconds: 500));
   }
 
-  void setBackgroundMode(bool isBackgroundMode) {
-    if (_isBackgroundMode == isBackgroundMode) {
-      return;
-    }
+  void _handlePowerModeChanged() {
+    final next = _powerMode.mode;
+    if (_currentPowerMode == next) return;
+    _currentPowerMode = next;
 
-    _isBackgroundMode = isBackgroundMode;
     if (!_isStopped && !_isShowingPopup) {
-      _scheduleNextCheck(_idleDelay);
+      // 回到前台时立刻探一次，别让用户等一个完整的轮询周期。
+      _scheduleNextCheck(
+        next == AppPowerMode.active ? Duration.zero : _idleDelay,
+      );
     }
+  }
+
+  void _handlePendingPopupQueued() {
+    if (_isStopped || _isShowingPopup) return;
+    // 有真实下载请求进来就不该继续深睡，但窗口仍然是隐藏的，
+    // 所以只退到 background 档并重新开始倒计时。
+    _powerMode.noteBackgroundActivity();
+    _scheduleNextCheck(Duration.zero);
   }
 
   void _scheduleNextCheck(Duration delay) {
@@ -62,6 +80,8 @@ class DownloadListenerService {
   // 停止监听
   void stopListening() {
     _isStopped = true;
+    _powerMode.removeListener(_handlePowerModeChanged);
+    NsfxHttpServer.removePendingPopupListener(_handlePendingPopupQueued);
     _pollTimer?.cancel();
     _pollTimer = null;
     _isChecking = false;
@@ -71,9 +91,11 @@ class DownloadListenerService {
     _logger.info('Download listener stopped');
   }
 
-  Duration get _idleDelay => _isBackgroundMode
-      ? const Duration(seconds: 6)
-      : const Duration(seconds: 2);
+  Duration get _idleDelay => switch (_currentPowerMode) {
+        AppPowerMode.active => const Duration(seconds: 2),
+        AppPowerMode.background => const Duration(seconds: 6),
+        AppPowerMode.ultraLite => const Duration(seconds: 30),
+      };
 
   // 检查是否有新的下载请求
   Future<bool> _checkForNewDownloads() async {

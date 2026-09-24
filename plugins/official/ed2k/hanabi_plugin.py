@@ -145,7 +145,21 @@ class HanabiPlugin:
 
     @staticmethod
     def _write(response: Mapping[str, Any]) -> None:
-        print(
-            json.dumps(response, ensure_ascii=False, separators=(",", ":")),
-            flush=True,
-        )
+        """Emit the response as UTF-8 bytes.
+
+        The host decodes stdout as UTF-8, but ``print`` encodes through
+        ``sys.stdout``, which uses the locale encoding — GBK on a Chinese
+        Windows install. Any non-ASCII character in the response (a Chinese
+        file name is enough) then makes the host's decode fail and the whole
+        call look like a dead plugin. Writing bytes skips the text layer, so
+        the result no longer depends on PYTHONIOENCODING being set.
+        """
+        payload = json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:  # Replaced stream (tests, embedding hosts).
+            print(payload, flush=True)
+            return
+        sys.stdout.flush()
+        buffer.write(payload.encode("utf-8"))
+        buffer.write(b"\n")
+        buffer.flush()

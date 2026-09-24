@@ -26,6 +26,35 @@ PLUGIN_ID = "hanabi.official.ed2k"
 MAX_ENGINE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MISSING_TASK_GRACE_SECONDS = 30
 
+# A freshly created aMule config dir has neither a server list nor Kad contacts,
+# so the daemon logs "No valid servers to which to connect found in server list"
+# and every task stays in "Waiting" forever. aMule only refreshes those files by
+# itself when Serverlist=1 is set, and even then not before the first connect
+# attempt, so the plugin seeds both files before the daemon starts.
+# 每个地址都经过实测：返回值必须能通过 _is_server_met / _is_nodes_dat 校验。
+# 站点挂掉或改成 HTML 提示页是常事，所以按顺序尝试，并且写入前校验格式。
+SERVER_MET_URLS = (
+    "https://upd.emule-security.org/server.met",
+    "http://ed2k.2x4u.de/v1s4vbaf/micro/server.met",
+    "http://upd.emule-security.org/server.met",
+    "https://www.gruk.org/server.met",
+)
+KAD_NODES_URLS = (
+    "https://upd.emule-security.org/nodes.dat",
+    "http://upd.emule-security.org/nodes.dat",
+)
+MAX_NETWORK_ASSET_BYTES = 4 * 1024 * 1024
+MIN_NETWORK_ASSET_BYTES = 32
+NETWORK_ASSET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+NETWORK_ASSET_RETRY_SECONDS = 10 * 60
+NETWORK_ASSET_TIMEOUT_SECONDS = 8
+
+# Connection probes cost one amulecmd process, so they are shared by every task
+# through a state file instead of running once per status poll.
+NETWORK_PROBE_INTERVAL_SECONDS = 20
+RECONNECT_INTERVAL_SECONDS = 60
+STALLED_SAMPLE_SECONDS = 45
+
 ENGINE_ASSETS = {
     "win-x64": {
         "name": "amule-3.0.0-windows-x64",
@@ -50,7 +79,12 @@ ED2K_FILE_PATTERN = re.compile(
 )
 HASH_PATTERN = re.compile(r"^[0-9A-F]{32}$")
 QUEUE_HEADER_PATTERN = re.compile(r"^\s*>\s*([0-9A-F]{32})\s+(.+?)\s*$", re.IGNORECASE)
-PROGRESS_PATTERN = re.compile(r"\[(\d+(?:\.\d+)?)%\]")
+# amulecmd right-aligns the percentage, so anything below 10% arrives as
+# "[ 0.0%]". The unpadded form only ever matched tasks already past 10%, which
+# left every freshly queued task parsed as a bare header with no state.
+PROGRESS_PATTERN = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*%\s*\]")
+# "[37.5%]    2/   5 - Downloading" -> 2 transferring sources out of 5 known ones.
+SOURCES_PATTERN = re.compile(r"\]\s*(\d+)\s*/\s*(\d+)")
 
 
 class PluginFailure(RuntimeError):
@@ -118,6 +152,23 @@ class AmuleTask:
     progress: float
     state: str
     part_file: str = ""
+    active_sources: int = 0
+    total_sources: int = 0
+
+
+@dataclass(frozen=True)
+class NetworkState:
+    ed2k_connected: bool
+    kad_connected: bool
+    firewalled: bool
+    summary: str
+    recognized: bool = True
+
+    @property
+    def offline(self) -> bool:
+        # Only claim the daemon is offline when the status output was actually
+        # understood: an unrecognised layout must not trigger reconnect churn.
+        return self.recognized and not self.ed2k_connected and not self.kad_connected
 
 
 @dataclass(frozen=True)
@@ -125,6 +176,7 @@ class BackendSession:
     client: "AmuleClient"
     incoming_dir: Path | None
     managed: bool
+    state_dir: Path | None = None
 
 
 class AmuleClient:
@@ -213,17 +265,64 @@ class AmuleClient:
             segments = [segment.strip() for segment in line.split(" - ")]
             state = segments[1] if len(segments) >= 2 else "waiting"
             part_file = segments[2] if len(segments) >= 3 else ""
+            sources = SOURCES_PATTERN.search(segments[0] if segments else line)
             tasks[current_hash] = AmuleTask(
                 file_hash=current_hash,
                 file_name=current_name,
                 progress=max(0.0, min(float(progress_match.group(1)) / 100, 1.0)),
                 state=state,
                 part_file=part_file,
+                active_sources=int(sources.group(1)) if sources else 0,
+                total_sources=int(sources.group(2)) if sources else 0,
             )
         return tasks
 
+    def connection_state(self) -> NetworkState:
+        """Read ed2k/Kad connectivity from the daemon status output.
+
+        amulecmd wording varies between builds, so unrecognised output is
+        reported as such rather than being read as "disconnected".
+        """
+        output = self.run("Status")
+        ed2k_connected = False
+        kad_connected = False
+        firewalled = False
+        recognized = False
+        details: list[str] = []
+        for raw_line in output.splitlines():
+            line = raw_line.strip(" >\t\r")
+            lowered = line.lower()
+            if "ed2k" in lowered and "connect" in lowered:
+                ed2k_connected = "not connected" not in lowered
+                recognized = True
+                details.append(line)
+            elif ("kad" in lowered or "kademlia" in lowered) and (
+                "connect" in lowered or "running" in lowered
+            ):
+                kad_connected = (
+                    "not connected" not in lowered and "not running" not in lowered
+                )
+                recognized = True
+                details.append(line)
+            if "firewall" in lowered or "lowid" in lowered or "low id" in lowered:
+                firewalled = True
+        return NetworkState(
+            ed2k_connected=ed2k_connected,
+            kad_connected=kad_connected,
+            firewalled=firewalled,
+            summary=" | ".join(details[:3]),
+            recognized=recognized,
+        )
+
     def verify_connection(self) -> None:
         self.run("Status")
+
+    def connect(self) -> None:
+        """Ask the daemon to (re)join both networks. Never fatal."""
+        try:
+            self.run("Connect")
+        except PluginFailure:
+            pass
 
 
 class AmuleBackendProvider:
@@ -252,6 +351,11 @@ class AmuleBackendProvider:
             or (self.data_dir / "logs")
         ).resolve()
         self.sleep = sleep
+        self._skip_running_session = False
+
+    def invalidate(self) -> None:
+        """Force the next session() call to re-check or restart the daemon."""
+        self._skip_running_session = True
 
     def session(self) -> BackendSession:
         config = self._load_config()
@@ -322,6 +426,7 @@ class AmuleBackendProvider:
             client=client,
             incoming_dir=Path(incoming).expanduser() if incoming else None,
             managed=False,
+            state_dir=self.data_dir,
         )
 
     def _read_state(self) -> dict[str, Any]:
@@ -337,6 +442,9 @@ class AmuleBackendProvider:
     def _running_managed_session(
         self, state: Mapping[str, Any]
     ) -> BackendSession | None:
+        if self._skip_running_session:
+            self._skip_running_session = False
+            return None
         try:
             executable = Path(str(state.get("amulecmd") or ""))
             password = str(state.get("password") or "")
@@ -344,9 +452,19 @@ class AmuleBackendProvider:
             incoming = Path(str(state.get("incomingDir") or ""))
             if not executable.is_file() or not password or port <= 0:
                 return None
-            client = AmuleClient(executable, "127.0.0.1", port, password, timeout=3)
-            client.verify_connection()
-            return BackendSession(client=client, incoming_dir=incoming, managed=True)
+            # A TCP probe replaces an amulecmd "Status" round trip here: every
+            # status poll used to spawn two processes just to reach the queue.
+            # If the port answers but the daemon is wedged, the actual command
+            # fails and the caller retries with a forced restart.
+            if not _ec_port_responding(port):
+                return None
+            client = AmuleClient(executable, "127.0.0.1", port, password, timeout=8)
+            return BackendSession(
+                client=client,
+                incoming_dir=incoming,
+                managed=True,
+                state_dir=self.data_dir,
+            )
         except (OSError, TypeError, ValueError, PluginFailure):
             return None
 
@@ -530,13 +648,22 @@ class AmuleBackendProvider:
         password = str(previous_state.get("password") or secrets.token_hex(32))
         used_ports: set[int] = set()
         ec_port = _usable_tcp_port(previous_state.get("ecPort"), used_ports)
-        client_port = _usable_tcp_port(previous_state.get("clientPort"), used_ports)
-        udp_port = _usable_udp_port(previous_state.get("udpPort"), used_ports)
+        # 没有配置时端口是随机分配的，用户没法在路由器上做固定转发，也就
+        # 永远拿不到 HighID。配置了就优先用它，UDP 沿用 eMule 的 TCP+10 惯例。
+        configured_port = _bounded_int(config.get("listenPort"), 0, 0, 65535)
+        client_port = _usable_tcp_port(
+            configured_port or previous_state.get("clientPort"), used_ports
+        )
+        udp_port = _usable_udp_port(
+            (configured_port + 10) if configured_port else previous_state.get("udpPort"),
+            used_ports,
+        )
         core_dir = self.data_dir / "core"
         incoming_dir = self.data_dir / "incoming"
         temporary_dir = self.data_dir / "temporary"
         for directory in (core_dir, incoming_dir, temporary_dir):
             directory.mkdir(parents=True, exist_ok=True)
+        self._bootstrap_network_files(core_dir, config)
         self._write_amule_config(
             core_dir / "amule.conf",
             password=password,
@@ -549,6 +676,9 @@ class AmuleBackendProvider:
             auto_connect=self._bool_setting(
                 "AMULE_AUTO_CONNECT", config, "autoConnect", True
             ),
+            upnp=self._bool_setting("AMULE_UPNP", config, "enableUpnp", True),
+            max_sources=_bounded_int(config.get("maxSourcesPerFile"), 1000, 20, 1000),
+            max_connections=_bounded_int(config.get("maxConnections"), 750, 100, 4000),
         )
 
         creation_flags = 0
@@ -603,8 +733,15 @@ class AmuleBackendProvider:
                         "startedAt": _utc_timestamp(),
                     },
                 )
+                # Autoconnect only fires once the daemon believes it has a
+                # usable server list; asking explicitly makes a cold start join
+                # ed2k and Kad right away instead of after the first retry.
+                client.connect()
                 return BackendSession(
-                    client=client, incoming_dir=incoming_dir, managed=True
+                    client=client,
+                    incoming_dir=incoming_dir,
+                    managed=True,
+                    state_dir=self.data_dir,
                 )
             except PluginFailure as error:
                 last_error = error.message
@@ -612,6 +749,183 @@ class AmuleBackendProvider:
         if process.poll() is None:
             process.terminate()
         raise PluginFailure(-32020, f"amuled did not become ready: {last_error}")
+
+    def _bootstrap_network_files(
+        self, core_dir: Path, config: Mapping[str, Any]
+    ) -> None:
+        """Seed server.met and nodes.dat so a cold daemon can find sources.
+
+        Every step is best effort: an offline host still starts the daemon and
+        aMule keeps whatever lists it already has.
+        """
+        if not self._bool_setting(
+            "AMULE_BOOTSTRAP_NETWORK", config, "bootstrapNetwork", True
+        ):
+            return
+
+        marker = self.data_dir / "network-bootstrap.json"
+        previous = _read_json(marker)
+        now = int(time.time())
+        last_attempt = _nonnegative_int(previous.get("attemptedAtEpoch"))
+        if now - last_attempt < NETWORK_ASSET_RETRY_SECONDS:
+            return
+
+        server_urls = self._source_urls(
+            config,
+            environment_name="AMULE_SERVER_MET_URL",
+            config_names=("serverMetUrls", "serverMetUrl"),
+            defaults_flag="useDefaultServerLists",
+            defaults_environment="AMULE_DEFAULT_SERVER_LISTS",
+            fallbacks=SERVER_MET_URLS,
+        )
+        nodes_urls = self._source_urls(
+            config,
+            environment_name="AMULE_KAD_NODES_URL",
+            config_names=("kadNodesUrls", "kadNodesUrl"),
+            defaults_flag="useDefaultKadNodes",
+            defaults_environment="AMULE_DEFAULT_KAD_NODES",
+            fallbacks=KAD_NODES_URLS,
+        )
+        results = {
+            "attemptedAtEpoch": now,
+            "serverMet": _fetch_network_asset(
+                core_dir / "server.met", server_urls, _is_server_met
+            ),
+            "nodesDat": _fetch_network_asset(
+                core_dir / "nodes.dat", nodes_urls, _is_nodes_dat
+            ),
+            "serverMetUrls": list(server_urls),
+            "kadNodesUrls": list(nodes_urls),
+        }
+        _write_json_atomic(marker, results)
+
+    # 宿主设置页声明的控件 ID -> config.json 的键与类型。
+    # 白名单保证插件只写自己认识的键，宿主 UI 里多出来的控件不会污染配置。
+    SETTINGS_SCHEMA: Mapping[str, str] = {
+        "enableUpnp": "bool",
+        "autoConnect": "bool",
+        "bootstrapNetwork": "bool",
+        "serverMetUrl": "text",
+        "useDefaultServerLists": "bool",
+        "kadNodesUrl": "text",
+        "useDefaultKadNodes": "bool",
+        "maxSourcesPerFile": "int",
+        "listenPort": "port",
+    }
+
+    def apply_settings(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+        """Merge host settings into config.json.
+
+        Merged rather than replaced: the settings dialog only knows about the
+        keys it declares, while the list manager and hand-written configs own
+        the rest.
+        """
+        config = self._load_config()
+        applied: dict[str, Any] = {}
+        for key, kind in self.SETTINGS_SCHEMA.items():
+            if key not in settings:
+                continue
+            raw = settings[key]
+            if kind == "bool":
+                value: Any = _coerce_bool(raw)
+            elif kind == "int":
+                value = _bounded_int(raw, 1000, 20, 1000)
+            elif kind == "port":
+                # 0 表示继续自动分配；1024 以下需要管理员权限，不接受。
+                text = str(raw or "").strip()
+                value = _bounded_int(text, 0, 0, 65535) if text else 0
+                if value != 0 and value < 1024:
+                    value = 0
+            else:
+                value = str(raw or "").strip()
+            if value is None:
+                continue
+            config[key] = value
+            applied[key] = value
+
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(self.data_dir / "config.json", config)
+        return {
+            "applied": applied,
+            # amuled 只在启动时读取配置，这里如实说明生效时机。
+            "restartRequired": bool(applied),
+        }
+
+    def refresh_network_lists(self) -> dict[str, Any]:
+        """Re-download server.met / nodes.dat regardless of their age."""
+        config = self._load_config()
+        core_dir = self.data_dir / "core"
+        core_dir.mkdir(parents=True, exist_ok=True)
+        server_urls = self._source_urls(
+            config,
+            environment_name="AMULE_SERVER_MET_URL",
+            config_names=("serverMetUrls", "serverMetUrl"),
+            defaults_flag="useDefaultServerLists",
+            defaults_environment="AMULE_DEFAULT_SERVER_LISTS",
+            fallbacks=SERVER_MET_URLS,
+        )
+        nodes_urls = self._source_urls(
+            config,
+            environment_name="AMULE_KAD_NODES_URL",
+            config_names=("kadNodesUrls", "kadNodesUrl"),
+            defaults_flag="useDefaultKadNodes",
+            defaults_environment="AMULE_DEFAULT_KAD_NODES",
+            fallbacks=KAD_NODES_URLS,
+        )
+        server_result = _fetch_network_asset(
+            core_dir / "server.met", server_urls, _is_server_met, force=True
+        )
+        nodes_result = _fetch_network_asset(
+            core_dir / "nodes.dat", nodes_urls, _is_nodes_dat, force=True
+        )
+        _write_json_atomic(
+            self.data_dir / "network-bootstrap.json",
+            {
+                "attemptedAtEpoch": int(time.time()),
+                "serverMet": server_result,
+                "nodesDat": nodes_result,
+                "serverMetUrls": list(server_urls),
+                "kadNodesUrls": list(nodes_urls),
+            },
+        )
+        return {
+            "serverMet": server_result,
+            "nodesDat": nodes_result,
+            "restartRequired": True,
+        }
+
+    def _source_urls(
+        self,
+        config: Mapping[str, Any],
+        *,
+        environment_name: str,
+        config_names: tuple[str, ...],
+        defaults_flag: str,
+        defaults_environment: str,
+        fallbacks: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Resolve list sources: user entries first, built-ins as fallback.
+
+        Accepts a single URL, a comma/whitespace separated string, or a list,
+        so the host settings UI and a hand-written config.json agree.
+        """
+        configured: list[str] = []
+        environment_value = self.environ.get(environment_name)
+        if environment_value is not None:
+            configured.extend(_split_urls(environment_value))
+        else:
+            for name in config_names:
+                configured.extend(_split_urls(config.get(name)))
+        if self._bool_setting(defaults_environment, config, defaults_flag, True):
+            configured.extend(fallbacks)
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for url in configured:
+            if url and url not in seen:
+                seen.add(url)
+                ordered.append(url)
+        return tuple(ordered)
 
     @staticmethod
     def _write_amule_config(
@@ -625,12 +939,15 @@ class AmuleBackendProvider:
         incoming_dir: Path,
         temporary_dir: Path,
         auto_connect: bool,
+        upnp: bool = True,
+        max_sources: int = 1000,
+        max_connections: int = 750,
     ) -> None:
         parser = configparser.RawConfigParser(interpolation=None, strict=False)
         parser.optionxform = str
         if path.exists():
             parser.read(path, encoding="utf-8-sig")
-        for section in ("eMule", "ExternalConnect", "WebServer"):
+        for section in ("eMule", "ExternalConnect", "WebServer", "Obfuscation"):
             if not parser.has_section(section):
                 parser.add_section(section)
         values = {
@@ -642,15 +959,38 @@ class AmuleBackendProvider:
             "Reconnect": "1",
             "ConnectToKad": "1",
             "ConnectToED2K": "1",
-            "UPnPEnabled": "0",
+            # Without a router mapping the client stays firewalled (LowID),
+            # which cuts it off from every other firewalled peer.
+            "UPnPEnabled": "1" if upnp else "0",
+            "UPnPTCPPort": str(client_port),
             "TempDir": _amule_path(temporary_dir),
             "IncomingDir": _amule_path(incoming_dir),
             "OSDirectory": _amule_path(core_dir) + ("\\\\" if os.name == "nt" else "/"),
             "AddNewFilesPaused": "0",
             "Language": "en",
             "NewVersionCheck": "0",
-            "KadNodesUrl": "https://upd.emule-security.org/nodes.dat",
-            "Ed2kServersUrl": "https://upd.emule-security.org/server.met",
+            "KadNodesUrl": KAD_NODES_URLS[0],
+            "Ed2kServersUrl": SERVER_MET_URLS[0],
+            # Serverlist=1 is aMule's "update the server list at startup"; the
+            # shipped default of 0 leaves a fresh profile with zero servers.
+            "Serverlist": "1",
+            "AddServerListFromServer": "1",
+            "AddServerListFromClient": "1",
+            "SafeServerConnect": "0",
+            "AutoConnectStaticOnly": "0",
+            "RemoveDeadServer": "1",
+            "DeadServerRetry": "3",
+            "MaxSourcesPerFile": str(max_sources),
+            "MaxConnections": str(max_connections),
+            "MaxConnectionsPerFiveSeconds": "40",
+            "MaxUpload": "0",
+            "MaxDownload": "0",
+            "DropSlowSources": "0",
+            "FileBufferSizePref": "64",
+            "CreateSparseFiles": "1",
+            "ICH": "1",
+            "SmartIdCheck": "1",
+            "IPFilterAutoLoad": "0",
         }
         for key, value in values.items():
             parser.set("eMule", key, value)
@@ -663,6 +1003,14 @@ class AmuleBackendProvider:
         }
         for key, value in external_values.items():
             parser.set("ExternalConnect", key, value)
+        # Obfuscated connections are the only way into servers and clients that
+        # refuse plain ed2k, and several large servers now do.
+        for key, value in {
+            "IsClientCryptLayerSupported": "1",
+            "IsCryptLayerRequested": "1",
+            "IsClientCryptLayerRequired": "0",
+        }.items():
+            parser.set("Obfuscation", key, value)
         parser.set("WebServer", "Enabled", "0")
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
@@ -754,7 +1102,7 @@ class Ed2kService:
         ).strip()
         link = Ed2kLink.parse(value)
         save_dir = str(params.get("saveDir") or "").strip()
-        session = self._backend_factory()
+        session, queue = self._queue()
         data = _plugin_data(
             link.file_hash,
             link.file_name,
@@ -764,7 +1112,6 @@ class Ed2kService:
             created_at=int(self._now()),
         )
         completed_path = _completed_path(data, session.incoming_dir, move_file=True)
-        queue = session.client.show_downloads()
         task = queue.get(link.file_hash)
         if task is None and completed_path is None:
             session.client.run(f"Add {link.normalized}", require_success=True)
@@ -788,19 +1135,24 @@ class Ed2kService:
 
     def status(self, params: Mapping[str, Any]) -> dict[str, Any]:
         data = _task_data(params)
-        session = self._backend_factory()
-        task = session.client.show_downloads().get(data["ed2kHash"])
+        session, queue = self._queue()
+        task = queue.get(data["ed2kHash"])
         if task is not None:
             progress = task.progress
+            downloaded = round(data["totalSize"] * progress)
+            status = _map_amule_state(task.state, progress)
             data["missingSinceEpoch"] = 0
             return {
-                "status": _map_amule_state(task.state, progress),
+                "status": status,
                 "totalSize": data["totalSize"],
-                "downloadedSize": round(data["totalSize"] * progress),
-                "speed": 0,
+                "downloadedSize": downloaded,
+                "speed": self._sample_speed(data, downloaded),
                 "progress": progress,
                 "filePath": _intended_path(data, session.incoming_dir),
                 "error": _amule_error(task.state),
+                "peerCount": task.active_sources,
+                "seeders": task.total_sources,
+                "statusDetail": self._status_detail(session, task, status),
                 "pluginData": data,
             }
 
@@ -838,8 +1190,8 @@ class Ed2kService:
 
     def pause(self, params: Mapping[str, Any]) -> dict[str, Any]:
         data = _task_data(params)
-        session = self._backend_factory()
-        task = session.client.show_downloads().get(data["ed2kHash"])
+        session, queue = self._queue()
+        task = queue.get(data["ed2kHash"])
         if task is None:
             return self.status(params)
         if task.state.strip().lower() != "paused":
@@ -848,8 +1200,8 @@ class Ed2kService:
 
     def resume(self, params: Mapping[str, Any]) -> dict[str, Any]:
         data = _task_data(params)
-        session = self._backend_factory()
-        task = session.client.show_downloads().get(data["ed2kHash"])
+        session, queue = self._queue()
+        task = queue.get(data["ed2kHash"])
         if task is None:
             return self.status(params)
         if task.state.strip().lower() == "paused":
@@ -858,10 +1210,156 @@ class Ed2kService:
 
     def remove(self, params: Mapping[str, Any]) -> dict[str, Any]:
         data = _task_data(params)
-        session = self._backend_factory()
-        if data["ed2kHash"] in session.client.show_downloads():
+        session, queue = self._queue()
+        if data["ed2kHash"] in queue:
             session.client.run(f"Cancel {data['ed2kHash']}", require_success=True)
         return {"status": "removed", "pluginData": data}
+
+    def apply_settings(self, settings: Mapping[str, Any]) -> dict[str, Any]:
+        return self._require_provider().apply_settings(settings)
+
+    def refresh_network_lists(self) -> dict[str, Any]:
+        result = self._require_provider().refresh_network_lists()
+        # 新列表要等 amuled 重启才会载入，但让运行中的守护进程重新连一次
+        # 服务器仍然有意义：之前连上的那台可能已经满员。
+        try:
+            session = self._backend_factory()
+            session.client.connect()
+        except PluginFailure:
+            pass
+        return result
+
+    def _require_provider(self) -> AmuleBackendProvider:
+        if self._provider is None:
+            raise PluginFailure(
+                -32020, "Settings are only available with the managed backend"
+            )
+        return self._provider
+
+    def _queue(self) -> tuple[BackendSession, dict[str, AmuleTask]]:
+        """Read the download queue, restarting a dead daemon once.
+
+        The session fast path only probes the external-connection port, so a
+        daemon that died and left the port to someone else is detected here.
+        A timeout is not treated as death: restarting a busy daemon would drop
+        every running transfer.
+        """
+        session = self._backend_factory()
+        try:
+            return session, session.client.show_downloads()
+        except PluginFailure as error:
+            if (
+                self._provider is None
+                or error.code != -32020
+                or "Cannot connect" not in error.message
+            ):
+                raise
+            self._provider.invalidate()
+            session = self._backend_factory()
+            return session, session.client.show_downloads()
+
+    def _sample_speed(self, data: dict[str, Any], downloaded: int) -> int:
+        """Derive a transfer rate from queue progress samples.
+
+        aMule only reports whole tenths of a percent over external connections,
+        so the byte count moves in bursts. The last rate is held between bursts
+        and decays to zero once the task has clearly stalled.
+        """
+        now = int(self._now())
+        previous_size = _nonnegative_int(data.get("lastSampleSize"))
+        previous_at = _nonnegative_int(data.get("lastSampleEpoch"))
+        previous_speed = _nonnegative_int(data.get("lastSpeed"))
+        elapsed = now - previous_at
+
+        if previous_at <= 0:
+            data["lastSampleSize"] = downloaded
+            data["lastSampleEpoch"] = now
+            data["lastSpeed"] = 0
+            return 0
+        if downloaded > previous_size and elapsed > 0:
+            speed = round((downloaded - previous_size) / elapsed)
+            smoothed = (
+                speed if previous_speed <= 0 else round(speed * 0.6 + previous_speed * 0.4)
+            )
+            data["lastSampleSize"] = downloaded
+            data["lastSampleEpoch"] = now
+            data["lastSpeed"] = smoothed
+            return smoothed
+        if downloaded < previous_size:
+            data["lastSampleSize"] = downloaded
+            data["lastSampleEpoch"] = now
+            data["lastSpeed"] = 0
+            return 0
+        if elapsed >= STALLED_SAMPLE_SECONDS:
+            data["lastSampleEpoch"] = now
+            data["lastSpeed"] = 0
+            return 0
+        return previous_speed
+
+    def _status_detail(
+        self,
+        session: BackendSession,
+        task: AmuleTask,
+        status: str,
+    ) -> str:
+        if status == "downloading":
+            return f"{task.active_sources}/{task.total_sources} sources"
+
+        network = self._network_state(session)
+        parts: list[str] = []
+        if task.total_sources > 0:
+            parts.append(f"queued at {task.total_sources} sources")
+        else:
+            parts.append("searching for sources")
+        if network is not None and network.recognized:
+            if network.offline:
+                parts.append("not connected to ed2k or Kad")
+            elif not network.ed2k_connected:
+                parts.append("Kad only, no ed2k server")
+            elif network.firewalled:
+                parts.append("firewalled (LowID)")
+        return " · ".join(parts)
+
+    def _network_state(self, session: BackendSession) -> NetworkState | None:
+        """Probe ed2k/Kad connectivity at most once per interval, shared by all
+        tasks, and nudge a disconnected daemon back onto the networks."""
+        if session.state_dir is None:
+            return None
+        path = session.state_dir / "network-state.json"
+        cached = _read_json(path)
+        now = int(self._now())
+        checked_at = _nonnegative_int(cached.get("checkedAtEpoch"))
+        if now - checked_at < NETWORK_PROBE_INTERVAL_SECONDS and checked_at > 0:
+            return NetworkState(
+                ed2k_connected=bool(cached.get("ed2kConnected")),
+                kad_connected=bool(cached.get("kadConnected")),
+                firewalled=bool(cached.get("firewalled")),
+                summary=str(cached.get("summary") or ""),
+                recognized=bool(cached.get("recognized")),
+            )
+
+        try:
+            state = session.client.connection_state()
+        except PluginFailure:
+            return None
+
+        connected_at = _nonnegative_int(cached.get("connectRequestedAtEpoch"))
+        if state.offline and now - connected_at >= RECONNECT_INTERVAL_SECONDS:
+            session.client.connect()
+            connected_at = now
+        _write_json_atomic(
+            path,
+            {
+                "checkedAtEpoch": now,
+                "ed2kConnected": state.ed2k_connected,
+                "kadConnected": state.kad_connected,
+                "firewalled": state.firewalled,
+                "summary": state.summary,
+                "recognized": state.recognized,
+                "connectRequestedAtEpoch": connected_at,
+            },
+        )
+        return state
 
 
 def _task_data(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -1096,6 +1594,121 @@ def _nonnegative_int(value: Any) -> int:
 def _amule_path(path: Path) -> str:
     value = str(path.resolve())
     return value.replace("\\", "\\\\") if os.name == "nt" else value
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        decoded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _split_urls(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        items = [str(item) for item in value]
+    else:
+        # Commas appear inside query strings (dl.php?load=min), so only split
+        # on newlines and whitespace unless a comma separates two schemes.
+        items = re.split(r"[\s\r\n]+|,(?=\s*[a-zA-Z][a-zA-Z0-9+.-]*://)", str(value))
+    return [item.strip() for item in items if item and item.strip()]
+
+
+def _ec_port_responding(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _is_server_met(payload: bytes) -> bool:
+    # server.met starts with a version byte (0xE0 for the current format)
+    # followed by a little-endian server count. An HTML error page or a
+    # rate-limit notice must never be written over the real list.
+    if payload[0] not in (0xE0, 0x0E):
+        return False
+    count = int.from_bytes(payload[1:5], "little")
+    return 0 < count <= 100000
+
+
+def _is_nodes_dat(payload: bytes) -> bool:
+    if payload[:1] in (b"<", b"{", b"#"):
+        return False
+    # Legacy layout is a contact count; the current one is a zero marker
+    # followed by a version. Both start with a small little-endian integer.
+    head = int.from_bytes(payload[0:4], "little")
+    return head <= 100000
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _fetch_network_asset(
+    destination: Path,
+    urls: tuple[str, ...],
+    validate: Callable[[bytes], bool] | None = None,
+    *,
+    force: bool = False,
+) -> str:
+    """Download server.met / nodes.dat when missing or stale.
+
+    Returns a short outcome string for the bootstrap marker file. Failures are
+    reported, never raised: a stale list still beats refusing to start.
+    """
+    try:
+        if destination.is_file() and not force:
+            stat = destination.stat()
+            fresh = time.time() - stat.st_mtime < NETWORK_ASSET_MAX_AGE_SECONDS
+            if fresh and stat.st_size >= MIN_NETWORK_ASSET_BYTES:
+                return "kept"
+    except OSError:
+        pass
+
+    last_error = "no url"
+    for url in urls:
+        try:
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "Hanabi-ED2K-Plugin/0.2.0"}
+            )
+            with urllib.request.urlopen(
+                request, timeout=NETWORK_ASSET_TIMEOUT_SECONDS
+            ) as response:
+                payload = response.read(MAX_NETWORK_ASSET_BYTES + 1)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as error:
+            last_error = str(error)
+            continue
+        if len(payload) < MIN_NETWORK_ASSET_BYTES:
+            last_error = "response too small"
+            continue
+        if len(payload) > MAX_NETWORK_ASSET_BYTES:
+            last_error = "response too large"
+            continue
+        if validate is not None and not validate(payload):
+            last_error = f"unexpected content from {url}"
+            continue
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_name(
+                f".{destination.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}"
+            )
+            temporary.write_bytes(payload)
+            temporary.replace(destination)
+        except OSError as error:
+            last_error = str(error)
+            continue
+        return f"updated from {url}"
+    return f"failed: {last_error}"
 
 
 def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:

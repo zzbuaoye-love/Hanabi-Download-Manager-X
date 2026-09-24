@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hanabi_download_manager_x/l10n/app_localizations.dart';
 import 'package:hanabi_download_manager_x/screens/widgets/plugin_store_page.dart';
 import 'package:hanabi_download_manager_x/services/plugin_lifecycle_service.dart';
+import 'package:hanabi_download_manager_x/services/plugin_diagnostic_logger.dart';
 import 'package:hanabi_download_manager_x/services/plugin_store_service.dart';
 import 'package:hanabi_download_manager_x/services/quick_path_service.dart';
 import 'package:hanabi_download_manager_x/theme/app_theme.dart';
@@ -42,6 +43,9 @@ Widget _buildTestApp() {
 void main() {
   testWidgets('plugin package install opens the global multi-file picker',
       (tester) async {
+    addTearDown(() async {
+      await PluginDiagnosticLogger().flush();
+    });
     await tester.binding.setSurfaceSize(const Size(1440, 960));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_buildTestApp());
@@ -79,5 +83,10 @@ void main() {
       isTrue,
     );
     expect(tester.takeException(), isNull);
+
+    // Dispose the open picker before the binding checks for leaked timers.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.runAsync(() => PluginDiagnosticLogger().flush());
   });
 }
