@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../models/download_task.dart';
+import 'app_power_mode_service.dart';
 import 'integrated_download_service.dart';
 import 'logger_service.dart';
 
@@ -116,6 +117,9 @@ class PopupProgressService {
       _broadcastTimer?.cancel();
       _broadcastTimer = null;
     } else {
+      // 独立弹窗正在盯着进度看。主窗口可能还藏在托盘里，但极致精简模式会
+      // 挂起进度流，弹窗就只能看到 30 秒一跳的数字——先退回 background 档。
+      AppPowerModeService().noteBackgroundActivity();
       _broadcastTimer ??=
           Timer.periodic(const Duration(milliseconds: 200), (_) {
         _broadcastProgress();

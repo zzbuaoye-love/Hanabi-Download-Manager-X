@@ -441,6 +441,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAutoStartFixedMessage => '检测到旧版本的自启动注册，已自动更新为当前版本';
 
   @override
+  String get settingsSectionBackgroundPower => '后台与占用';
+
+  @override
+  String get settingsUltraLiteTitle => '极致精简模式';
+
+  @override
+  String get settingsUltraLiteSubtitle =>
+      '窗口长时间留在后台后自动进入超低占用状态：暂停界面刷新、动画与统计采样，只保留下载与浏览器接管等核心业务。重新打开窗口时立即恢复全速。';
+
+  @override
+  String get settingsUltraLiteIdleTitle => '进入精简模式的等待时间';
+
+  @override
+  String get settingsUltraLiteIdleSubtitle =>
+      '窗口隐藏到托盘或最小化后，超过这段时间没有被重新拉起就进入极致精简模式';
+
+  @override
+  String settingsUltraLiteIdleMinutesLabel(Object minutes) {
+    return '$minutes 分钟';
+  }
+
+  @override
   String get settingsSectionBehavior => '行为设置';
 
   @override
@@ -767,6 +789,129 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsDownloadCardHttpBadgeSubtitle => '在每个下载卡片显示 HTTP 版本和目标连通性';
+
+  @override
+  String get settingsGeoBadgeTitle => 'IP 归属地徽标';
+
+  @override
+  String get settingsGeoBadgeSubtitle => '在下载卡片上显示 出口国 → 目标服务器国 的国旗徽标';
+
+  @override
+  String get settingsGeoSourceTitle => '归属地数据源';
+
+  @override
+  String get settingsGeoSourceSubtitle =>
+      '在线接口即开即用；离线库只用本地数据库和系统 DNS，不联系第三方归属地或公共 DoH';
+
+  @override
+  String get settingsGeoSourceOnline => '在线接口';
+
+  @override
+  String get settingsGeoSourceOffline => '离线数据库';
+
+  @override
+  String get settingsGeoPrivacyNotice =>
+      '在线模式会把目标 IP 发送给第三方归属地接口，并通过公共 DoH 解析域名；离线模式不会，且无法显示出口国家';
+
+  @override
+  String get settingsGeoOfflinePackTitle => '离线归属地资源包';
+
+  @override
+  String get settingsGeoOfflinePackMissing => '未安装';
+
+  @override
+  String settingsGeoOfflinePackReady(String size) {
+    return '已安装（$size）';
+  }
+
+  @override
+  String get settingsGeoOfflinePackDownload => '下载资源包';
+
+  @override
+  String settingsGeoOfflinePackDownloading(int percent) {
+    return '下载中 $percent%';
+  }
+
+  @override
+  String get settingsGeoOfflinePackRemove => '删除资源包';
+
+  @override
+  String settingsGeoOfflinePackFailed(String error) {
+    return '资源包下载失败：$error';
+  }
+
+  @override
+  String get settingsGeoOfflinePackSourceNote =>
+      '数据来自 ip-location-db（CC0 公共领域）';
+
+  @override
+  String get geoBadgeLocalEndpoint => '本机 / 内网';
+
+  @override
+  String get settingsGeoAccuracyNoticeTitle => '出口国的精度限制';
+
+  @override
+  String get settingsGeoAccuracyNotice =>
+      '使用 Clash / mihomo / sing-box 等本机规则型代理时，分流规则位于代理客户端内部，本应用只能看到本地监听地址，无法得知某个下载目标实际命中了哪条规则——同一个客户端完全可能让 A 站点走境外节点、B 站点直连。此时徽标显示的出口国为近似值，徽标提示中会明确标注。目标服务器国不受影响。';
+
+  @override
+  String get geoBadgeEgressRuleBased => '代理为本机规则型客户端，实际分流规则不可见；出口国为近似值';
+
+  @override
+  String get settingsGeoPackUrlTitle => '资源包下载源';
+
+  @override
+  String get settingsGeoPackUrlSubtitle => '内置源均位于境外；可改为镜像地址或自建源';
+
+  @override
+  String get settingsGeoPackUrlPlaceholder => '留空则使用内置默认源';
+
+  @override
+  String get settingsGeoPackUrlSave => '保存';
+
+  @override
+  String get settingsGeoPackUrlReset => '恢复默认';
+
+  @override
+  String get settingsGeoPackUrlInvalid => '下载地址无效';
+
+  @override
+  String get settingsGeoPackUrlSaved => '下载源已更新';
+
+  @override
+  String get settingsGeoPackPresetLabel => '内置源';
+
+  @override
+  String get settingsGeoPackPresetJsdelivr => 'jsDelivr（支持断点续传）';
+
+  @override
+  String get settingsGeoPackPresetUnpkg => 'unpkg（更快，不支持续传）';
+
+  @override
+  String get settingsGeoPackImportTitle => '从本地文件导入';
+
+  @override
+  String get settingsGeoPackImportSubtitle =>
+      '下载源被阻断时，可自行下载资源包后导入；支持 ip-location-db 与 IP2Location LITE 的 CSV，可为 .gz 压缩包';
+
+  @override
+  String get settingsGeoPackImportButton => '选择文件导入';
+
+  @override
+  String get settingsGeoPackImportValidating => '校验中…';
+
+  @override
+  String settingsGeoPackImportSuccess(String size) {
+    return '导入成功（$size）';
+  }
+
+  @override
+  String settingsGeoPackImportFailed(String error) {
+    return '导入失败：$error';
+  }
+
+  @override
+  String get settingsGeoPackImportPickerTitle => '选择离线归属地资源包';
 
   @override
   String get settingsDefaultUserAgentTitle => '默认 User-Agent';
@@ -2411,6 +2556,42 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String downloadIntentUnsupportedType(Object type) {
     return '已识别为 $type，但当前版本暂不支持直接下载';
+  }
+
+  @override
+  String get addDownloadSupportedProtocolsLabel => '当前支持';
+
+  @override
+  String get addDownloadProtocolHttp => 'HTTP/HTTPS';
+
+  @override
+  String get addDownloadProtocolMagnet => '磁力链接';
+
+  @override
+  String get addDownloadProtocolTorrentFile => '种子文件';
+
+  @override
+  String get addDownloadProtocolEd2k => 'ED2K';
+
+  @override
+  String get addDownloadProtocolResolver => '解析器';
+
+  @override
+  String get addDownloadProtocolBuiltIn => '内置支持';
+
+  @override
+  String addDownloadProtocolProvidedBy(Object provider) {
+    return '由 $provider 插件提供';
+  }
+
+  @override
+  String addDownloadIntentPluginReady(Object type, Object plugin) {
+    return '已识别为 $type，将由「$plugin」插件处理';
+  }
+
+  @override
+  String addDownloadIntentNoPlugin(Object type) {
+    return '已识别为 $type，但没有已启用的插件支持它。请在插件页安装或启用对应插件';
   }
 
   @override
@@ -4193,6 +4374,42 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get geoBadgeResolving => '定位中…';
+
+  @override
+  String get geoBadgeUnknownCountry => '未知';
+
+  @override
+  String get geoBadgeFailed => '定位失败';
+
+  @override
+  String get geoBadgeDisabledHint => 'IP 归属地徽标已关闭';
+
+  @override
+  String get geoBadgeTooltipEgress => '发起出口';
+
+  @override
+  String get geoBadgeTooltipTarget => '目标服务器';
+
+  @override
+  String get geoBadgeTooltipVia => '经代理';
+
+  @override
+  String get geoBadgeTooltipDirect => '直连';
+
+  @override
+  String get geoBadgeUplink => '上行';
+
+  @override
+  String get geoBadgeDownlink => '下行';
+
+  @override
+  String get geoBadgeSourceOnlineTag => '在线';
+
+  @override
+  String get geoBadgeSourceOfflineTag => '离线库';
+
+  @override
   String get downloadFailureHintAuth => '可能需要登录或补充 Referer/Cookie，链接可能已过期。';
 
   @override
@@ -4286,6 +4503,41 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get noticeOpenLink => '打开链接';
+
+  @override
+  String get noticeViewCards => '切换到卡片视图';
+
+  @override
+  String get noticeViewSplit => '切换到分栏视图';
+
+  @override
+  String get noticeLevelInfo => '信息';
+
+  @override
+  String get noticeLevelSuccess => '更新';
+
+  @override
+  String get noticeLevelWarning => '注意';
+
+  @override
+  String get noticeLevelCritical => '重要';
+
+  @override
+  String get noticeEmptySubtitle => '这里会显示来自 Hanabi 的公告与更新说明';
+
+  @override
+  String get noticeSelectPromptTitle => '选择一条通知';
+
+  @override
+  String get noticeSelectPromptSubtitle => '从左侧列表中选择通知即可阅读完整内容';
+
+  @override
+  String get noticeCloseDetail => '关闭详情';
+
+  @override
+  String noticeListHeader(Object count) {
+    return '共 $count 条通知';
+  }
 
   @override
   String get settingsLogManagementSection => '日志管理';

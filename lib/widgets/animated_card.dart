@@ -26,12 +26,13 @@ class AnimatedCard extends StatefulWidget {
     this.hoverColor,
     this.borderColor,
     this.hoverBorderColor,
-    this.borderRadius = 12.0,
+    this.borderRadius = 8.0,
     this.onTap,
     this.enableHoverAnimation = true,
     this.enableScaleAnimation = true,
     this.enableGlowAnimation = true,
-    this.animationDuration = const Duration(milliseconds: 120),
+    // WinUI 3: 150ms easeOutCubic 的 subtle 过渡
+    this.animationDuration = const Duration(milliseconds: 150),
   });
 
   @override
@@ -41,6 +42,7 @@ class AnimatedCard extends StatefulWidget {
 class _AnimatedCardState extends State<AnimatedCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _hoverController;
+  late Animation<double> _hoverAnimation;
   bool _isHovered = false;
 
   // 缓存颜色值，避免每帧重新计算
@@ -57,23 +59,25 @@ class _AnimatedCardState extends State<AnimatedCard>
       duration: widget.animationDuration,
       vsync: this,
     );
+    _hoverAnimation = CurvedAnimation(
+      parent: _hoverController,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
   }
 
   void _initColors() {
-    _bgColor = widget.backgroundColor ??
-        AppTheme.cardBackground(darkAlpha: 0.78, lightAlpha: 0.85);
+    // WinUI 3: 卡片默认使用主题卡面令牌，hover 仅做 subtle 填充变化
+    _bgColor = widget.backgroundColor ?? AppTheme.surfaceCard;
     _hoverColor = widget.hoverColor ??
         (widget.backgroundColor == Colors.transparent
             ? Colors.transparent
-            : AppTheme.cardHoverBackground(
-                darkAlpha: 0.88,
-                lightAlpha: 0.95,
-              ));
-    _borderColor = widget.borderColor ?? AppTheme.borderSubtle;
+            : AppTheme.surfaceCardHover);
+    _borderColor = widget.borderColor ?? AppTheme.borderDefault;
     _hoverBorderColor = widget.hoverBorderColor ??
         (widget.borderColor == Colors.transparent
             ? Colors.transparent
-            : AppTheme.accentPrimary.withValues(alpha: 0.4));
+            : AppTheme.borderDefault);
   }
 
   @override
@@ -122,21 +126,14 @@ class _AnimatedCardState extends State<AnimatedCard>
         child: GestureDetector(
           onTap: widget.onTap,
           child: AnimatedBuilder(
-            animation: _hoverController,
+            animation: _hoverAnimation,
             builder: (context, child) {
-              final hoverValue = _hoverController.value;
+              final hoverValue = _hoverAnimation.value;
 
-              // 优化：使用简单的透明度变化代替 Color.lerp
-              final currentBgColor = _bgColor.withValues(
-                  alpha:
-                      _bgColor.a + (_hoverColor.a - _bgColor.a) * hoverValue);
-              final currentBorderColor = _borderColor.withValues(
-                  alpha: _borderColor.a +
-                      (_hoverBorderColor.a - _borderColor.a) * hoverValue);
-
-              // 优化：只在非 hover 时显示静态阴影
-              final showShadows =
-                  widget.enableGlowAnimation && hoverValue <= 0.01;
+              final currentBgColor =
+                  Color.lerp(_bgColor, _hoverColor, hoverValue)!;
+              final currentBorderColor =
+                  Color.lerp(_borderColor, _hoverBorderColor, hoverValue)!;
 
               return Container(
                 margin: widget.margin,
@@ -146,12 +143,13 @@ class _AnimatedCardState extends State<AnimatedCard>
                     color: currentBorderColor,
                     width: 1.0,
                   ),
-                  boxShadow: showShadows
+                  // WinUI 3: 阴影常驻，hover 仅变化填充（避免阴影闪断）
+                  boxShadow: widget.enableGlowAnimation
                       ? [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
+                            color: Colors.black.withValues(alpha: 0.06),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
                           )
                         ]
                       : const <BoxShadow>[],

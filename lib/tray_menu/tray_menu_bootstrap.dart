@@ -28,6 +28,36 @@ Size calculateTrayMenuWindowSize(Size contentSize) {
   );
 }
 
+/// Everything the native window needs to host the menu.
+///
+/// [envelope] is the content currently on screen (main panel, plus the open
+/// submenu). The window hugs it: on machines where DWM per-pixel alpha is
+/// unavailable the uncovered window area renders as an opaque near-black
+/// rectangle, so any speculative reservation shows up as a giant dark box.
+/// Submenu opens grow the window FIRST and paint only after the native side
+/// acknowledges, which is what prevents the flyout being sliced off mid-tile.
+/// [mainPanel] is the visible menu panel used to anchor positioning.
+class TrayMenuGeometry {
+  const TrayMenuGeometry({
+    required this.envelope,
+    required this.mainPanel,
+  });
+
+  final Size envelope;
+  final Size mainPanel;
+
+  bool closeTo(TrayMenuGeometry? other) {
+    if (other == null) {
+      return false;
+    }
+    bool near(double a, double b) => (a - b).abs() <= 0.5;
+    return near(envelope.width, other.envelope.width) &&
+        near(envelope.height, other.envelope.height) &&
+        near(mainPanel.width, other.mainPanel.width) &&
+        near(mainPanel.height, other.mainPanel.height);
+  }
+}
+
 bool get _disableWindowsSemanticsWorkaround =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
@@ -416,8 +446,19 @@ class TrayMenuWindowPage extends StatefulWidget {
   State<TrayMenuWindowPage> createState() => _TrayMenuWindowPageState();
 }
 
-class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
-  final GlobalKey _contentKey = GlobalKey();
+class _TrayMenuWindowPageState extends State<TrayMenuWindowPage>
+    with SingleTickerProviderStateMixin {
+  static const int _maxResizeAttempts = 8;
+  static const Duration _resizeRetryDelay = Duration(milliseconds: 60);
+  static const Duration _exitFadeDuration = Duration(milliseconds: 80);
+
+  /// One settle probe before the first reveal. A cold tray engine finishes
+  /// loading its CJK font and its DPI scale a few frames after the first
+  /// layout; showing on the very first measurement briefly presented a menu
+  /// with the wrong metrics that then visibly snapped into shape.
+  static const Duration _settleProbeDelay = Duration(milliseconds: 40);
+  static const int _maxSettleLoops = 6;
+
   bool _isClosing = false;
   bool _isActionRunning = false;
   bool _windowSizeSyncScheduled = false;
@@ -426,9 +467,15 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
   late TrayMenuLaunchData _currentLaunchData;
   int _contentSessionId = 0;
   bool _needsPrecisePosition = true;
-  Size? _reportedContentSize;
-  int? _lastRequestedWindowHeight;
-  int? _lastRequestedWindowWidth;
+  TrayMenuGeometry? _reportedGeometry;
+  int? _lastAppliedWindowHeight;
+  int? _lastAppliedWindowWidth;
+  int _resizeAttempts = 0;
+  Timer? _resizeRetryTimer;
+  int _revealTick = 0;
+  bool _isExitFading = false;
+  String? _lastRegionSignature;
+  int _settleLoops = 0;
 
   @override
   void initState() {
@@ -449,6 +496,7 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
 
   @override
   void dispose() {
+    _resizeRetryTimer?.cancel();
     super.dispose();
   }
 
@@ -456,11 +504,17 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
     if (!mounted) {
       return;
     }
+    _resizeRetryTimer?.cancel();
     setState(() {
       _currentLaunchData = launchData;
       _contentSessionId++;
-      _reportedContentSize = null;
+      _reportedGeometry = null;
       _needsPrecisePosition = true;
+      _resizeAttempts = 0;
+      _settleLoops = 0;
+      _lastRegionSignature = null;
+      _isExitFading = false;
+      _isClosing = false;
     });
     _scheduleWindowSizeSync();
   }
@@ -469,6 +523,13 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
     if (_isClosing) return;
     _isClosing = true;
     try {
+      // Brief fade so dismissal reads as intentional instead of the window
+      // vanishing mid-click. Native deactivation (clicking elsewhere) still
+      // closes instantly, matching platform flyouts.
+      if (mounted && _revealTick > 0) {
+        setState(() => _isExitFading = true);
+        await Future<void>.delayed(_exitFadeDuration);
+      }
       await _windowChannel.invokeMethod('closeWindow');
     } finally {
       _isClosing = false;
@@ -618,7 +679,12 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
       return;
     }
     _windowSizeSyncScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // A microtask, not a post-frame callback: the sync only reads the cached
+    // geometry and talks to the platform channel, so it must not depend on a
+    // new frame ever being produced. The retry timer fires on an idle window
+    // where nothing schedules frames, and a post-frame hop would leave the
+    // stale window size in place until the user happened to hover something.
+    scheduleMicrotask(() {
       _windowSizeSyncScheduled = false;
       unawaited(_drainWindowSizeSync());
     });
@@ -639,16 +705,111 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
     }
   }
 
-  void _handleDesiredContentSizeChanged(Size size) {
-    final previous = _reportedContentSize;
-    if (previous != null &&
-        (previous.width - size.width).abs() <= 0.5 &&
-        (previous.height - size.height).abs() <= 0.5) {
+  void _handleGeometryChanged(TrayMenuGeometry geometry) {
+    if (geometry.closeTo(_reportedGeometry)) {
       return;
     }
-    _reportedContentSize = size;
+    _reportedGeometry = geometry;
     _needsPrecisePosition = true;
+    _resizeAttempts = 0;
     _scheduleWindowSizeSync();
+  }
+
+  void _handlePanelRectsChanged(List<Rect> panelRects) {
+    if (!Platform.isWindows || panelRects.isEmpty) {
+      return;
+    }
+    final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+    // Panels get a small halo for the drop shadow; the window region clips
+    // painting AND hit-testing, so it doubles as the click-through boundary
+    // and hides the opaque host rectangle on machines without DWM alpha.
+    const shadowPad = 8.0;
+    final rects = <Map<String, Object>>[];
+    final signature = StringBuffer('$devicePixelRatio');
+    for (final rect in panelRects) {
+      final padded = rect.inflate(shadowPad);
+      final scaled = Rect.fromLTRB(
+        padded.left * devicePixelRatio,
+        padded.top * devicePixelRatio,
+        padded.right * devicePixelRatio,
+        padded.bottom * devicePixelRatio,
+      );
+      rects.add(<String, Object>{
+        'x': scaled.left,
+        'y': scaled.top,
+        'width': scaled.width,
+        'height': scaled.height,
+      });
+      signature.write(
+        ';${scaled.left.round()},${scaled.top.round()},'
+        '${scaled.width.round()},${scaled.height.round()}',
+      );
+    }
+    final nextSignature = signature.toString();
+    if (nextSignature == _lastRegionSignature) {
+      return;
+    }
+    _lastRegionSignature = nextSignature;
+    unawaited(
+      _windowChannel.invokeMethod<void>('setTrayMenuRegion', <String, Object>{
+        'radius': (AppTheme.radiusLg + shadowPad).round(),
+        'rects': rects,
+      }).catchError((Object error) {
+        _lastRegionSignature = null;
+        debugPrint('Failed to set tray menu region: $error');
+      }),
+    );
+  }
+
+  /// Content-side request to grow the window before a submenu paints.
+  Future<bool> _ensureContentSpace(TrayMenuGeometry geometry) async {
+    _reportedGeometry = geometry;
+    final applied = await _applyWindowSize(geometry);
+    if (!applied) {
+      _scheduleResizeRetry();
+    }
+    return applied;
+  }
+
+  /// Pushes the window size for [geometry]. Returns false when the native
+  /// side refused or errored, in which case nothing is latched so the next
+  /// attempt retries instead of being deduplicated away.
+  Future<bool> _applyWindowSize(TrayMenuGeometry geometry) async {
+    final desiredSize = calculateTrayMenuWindowSize(geometry.envelope);
+    final desiredHeight = desiredSize.height.toInt();
+    final desiredWidth = desiredSize.width.toInt();
+    final heightUnchanged = _lastAppliedWindowHeight != null &&
+        (_lastAppliedWindowHeight! - desiredHeight).abs() <= 1;
+    final widthUnchanged = _lastAppliedWindowWidth != null &&
+        (_lastAppliedWindowWidth! - desiredWidth).abs() <= 1;
+    if (heightUnchanged && widthUnchanged) {
+      return true;
+    }
+
+    try {
+      final applied = await _windowChannel.invokeMethod<bool>(
+        'resizeWindow',
+        <String, Object>{
+          'width': desiredWidth,
+          'height': desiredHeight,
+        },
+      );
+      if (applied != true) {
+        return false;
+      }
+    } catch (e) {
+      debugPrint('Failed to resize tray menu window: $e');
+      return false;
+    }
+
+    // Only latch on success. Latching before the call meant one failed resize
+    // (engine still booting, channel hiccup) left the window at its 184x320
+    // creation size forever while the dedup logic insisted nothing needed
+    // doing — the menu showed up cut through the middle.
+    _lastAppliedWindowHeight = desiredHeight;
+    _lastAppliedWindowWidth = desiredWidth;
+    _resizeAttempts = 0;
+    return true;
   }
 
   Future<void> _syncWindowSize() async {
@@ -656,69 +817,70 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
       return;
     }
 
-    final context = _contentKey.currentContext;
-    if (context == null) {
+    final geometry = _reportedGeometry;
+    if (geometry == null) {
+      // Content has not reported yet; the post-frame report will reschedule.
       return;
     }
 
-    final renderObject = context.findRenderObject();
-    if (renderObject is! RenderBox || !renderObject.hasSize) {
+    final anchorSize = calculateTrayMenuWindowSize(geometry.mainPanel);
+    if (!await _applyWindowSize(geometry)) {
+      _scheduleResizeRetry();
       return;
     }
-
-    final laidOutSize = renderObject.size;
-    var measuredHeight = _reportedContentSize?.height ?? laidOutSize.height;
-    if (_reportedContentSize == null) {
-      try {
-        final dryLayoutSize = renderObject.getDryLayout(
-          BoxConstraints.tightFor(width: laidOutSize.width),
-        );
-        if (dryLayoutSize.height.isFinite &&
-            dryLayoutSize.height > measuredHeight) {
-          measuredHeight = dryLayoutSize.height;
-        }
-      } catch (_) {
-        // Fallback to the current laid out size when dry layout isn't available.
-      }
-    }
-
-    final contentWidth = _reportedContentSize?.width ?? laidOutSize.width;
-    final contentHeight = _reportedContentSize?.height ?? measuredHeight;
-    final desiredSize = calculateTrayMenuWindowSize(
-      Size(contentWidth, contentHeight),
-    );
-    final desiredHeight = desiredSize.height.toInt();
-    final desiredWidth = desiredSize.width.toInt();
-    final heightUnchanged = _lastRequestedWindowHeight != null &&
-        (_lastRequestedWindowHeight! - desiredHeight).abs() <= 1;
-    final widthUnchanged = _lastRequestedWindowWidth != null &&
-        (_lastRequestedWindowWidth! - desiredWidth).abs() <= 1;
 
     try {
-      if (!heightUnchanged || !widthUnchanged) {
-        _lastRequestedWindowHeight = desiredHeight;
-        _lastRequestedWindowWidth = desiredWidth;
-        await _windowChannel.invokeMethod<void>(
-          'resizeWindow',
-          <String, Object>{
-            'width': desiredWidth,
-            'height': desiredHeight,
-          },
-        );
-      }
       if (_needsPrecisePosition && _currentLaunchData.showOnReady) {
+        // Hold the reveal while the layout is still moving. A cold engine
+        // settles its font and DPI within the first few frames; revealing on
+        // the very first measurement showed those wrong metrics on screen.
+        if (_settleLoops < _maxSettleLoops) {
+          _settleLoops++;
+          await Future<void>.delayed(_settleProbeDelay);
+          if (!mounted) {
+            return;
+          }
+          if (!identical(_reportedGeometry, geometry)) {
+            // Geometry shifted during the probe; run the loop again with the
+            // fresh values before anything becomes visible.
+            _windowSizeSyncPending = true;
+            return;
+          }
+        }
+        if (mounted) {
+          // Start the entrance animation before the native window becomes
+          // visible so its first presented frame is already mid-fade. Each
+          // session positions exactly once, so this fires once per open.
+          setState(() => _revealTick++);
+        }
         await _windowChannel.invokeMethod<void>(
           'positionTrayMenu',
           <String, Object>{
             'x': _currentLaunchData.mousePositionX,
             'y': _currentLaunchData.mousePositionY,
+            'anchorWidth': anchorSize.width.toInt(),
+            'anchorHeight': anchorSize.height.toInt(),
           },
         );
         _needsPrecisePosition = false;
       }
     } catch (e) {
       debugPrint('Failed to sync tray menu window size: $e');
+      _scheduleResizeRetry();
     }
+  }
+
+  void _scheduleResizeRetry() {
+    if (_resizeAttempts >= _maxResizeAttempts) {
+      return;
+    }
+    _resizeAttempts++;
+    _resizeRetryTimer?.cancel();
+    _resizeRetryTimer = Timer(_resizeRetryDelay, () {
+      if (mounted) {
+        _scheduleWindowSizeSync();
+      }
+    });
   }
 
   @override
@@ -737,30 +899,26 @@ class _TrayMenuWindowPageState extends State<TrayMenuWindowPage> {
             alignment: Alignment.topLeft,
             child: Padding(
               padding: kTrayMenuWindowInsets,
-              child: NotificationListener<SizeChangedLayoutNotification>(
-                onNotification: (_) {
-                  _scheduleWindowSizeSync();
-                  return false;
-                },
-                child: SizeChangedLayoutNotifier(
-                  child: KeyedSubtree(
-                    key: _contentKey,
-                    child: TrayMenuContent(
-                      key: ValueKey(_contentSessionId),
-                      onShowWindow: _onShowWindow,
-                      onCreateDownload: _openMainWindowToAddDownload,
-                      onOpenDownloadingPage: _openMainWindowToDownloadingPage,
-                      onOpenDownloads: _openDownloadsFolder,
-                      onOpenLogs: _openLogsFolder,
-                      onOpenProject: _openProjectPage,
-                      onOpenOfficial: _openOfficialPage,
-                      onExit: _onExit,
-                      isBusy: _isActionRunning,
-                      activeTasks: _currentLaunchData.activeTasks,
-                      onDesiredContentSizeChanged:
-                          _handleDesiredContentSizeChanged,
-                    ),
-                  ),
+              child: AnimatedOpacity(
+                opacity: _isExitFading ? 0 : 1,
+                duration: _exitFadeDuration,
+                curve: Curves.easeOut,
+                child: TrayMenuContent(
+                  key: ValueKey(_contentSessionId),
+                  onShowWindow: _onShowWindow,
+                  onCreateDownload: _openMainWindowToAddDownload,
+                  onOpenDownloadingPage: _openMainWindowToDownloadingPage,
+                  onOpenDownloads: _openDownloadsFolder,
+                  onOpenLogs: _openLogsFolder,
+                  onOpenProject: _openProjectPage,
+                  onOpenOfficial: _openOfficialPage,
+                  onExit: _onExit,
+                  isBusy: _isActionRunning,
+                  activeTasks: _currentLaunchData.activeTasks,
+                  revealTick: _revealTick,
+                  onGeometryChanged: _handleGeometryChanged,
+                  onPanelRectsChanged: _handlePanelRectsChanged,
+                  onEnsureContentSpace: _ensureContentSpace,
                 ),
               ),
             ),
@@ -782,7 +940,17 @@ class TrayMenuContent extends StatefulWidget {
   final Future<void> Function() onExit;
   final bool isBusy;
   final List<TrayMenuActiveTaskPreview> activeTasks;
-  final ValueChanged<Size> onDesiredContentSizeChanged;
+
+  /// Incremented by the host page right before the native window is shown;
+  /// each new value replays the entrance animation.
+  final int revealTick;
+  final ValueChanged<TrayMenuGeometry> onGeometryChanged;
+  final ValueChanged<List<Rect>> onPanelRectsChanged;
+
+  /// Grows the native window to [TrayMenuGeometry.envelope] and completes once
+  /// the platform acknowledged. Painting a submenu before this resolves is what
+  /// used to slice the flyout off at the old window edge.
+  final Future<bool> Function(TrayMenuGeometry geometry) onEnsureContentSpace;
 
   const TrayMenuContent({
     super.key,
@@ -796,14 +964,18 @@ class TrayMenuContent extends StatefulWidget {
     required this.onExit,
     required this.isBusy,
     required this.activeTasks,
-    required this.onDesiredContentSizeChanged,
+    required this.revealTick,
+    required this.onGeometryChanged,
+    required this.onPanelRectsChanged,
+    required this.onEnsureContentSpace,
   });
 
   @override
   State<TrayMenuContent> createState() => _TrayMenuContentState();
 }
 
-class _TrayMenuContentState extends State<TrayMenuContent> {
+class _TrayMenuContentState extends State<TrayMenuContent>
+    with TickerProviderStateMixin {
   static const double _minMenuWidth = 156;
   static const double _maxMenuWidth = 228;
   static const double _menuTileChrome = 58;
@@ -812,6 +984,15 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
   static const double _menuTileHeight = 32;
   static const double _panelInnerTop = 6;
   static const double _panelInnerBottom = 5;
+
+  /// Vertical panel chrome: inner padding plus the 1px border on each side.
+  static const double _panelVerticalChrome =
+      _panelInnerTop + _panelInnerBottom + 2;
+
+  static const Duration _entranceDuration = Duration(milliseconds: 150);
+  static const Duration _submenuOpenDuration = Duration(milliseconds: 130);
+  static const Duration _submenuCloseDuration = Duration(milliseconds: 90);
+  static const Duration _hoverDuration = Duration(milliseconds: 90);
   static const TextStyle _menuLabelBaseStyle = TextStyle(
     fontSize: 11,
     fontWeight: FontWeight.w600,
@@ -835,16 +1016,89 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
   final GlobalKey _mainPanelKey = GlobalKey();
   final GlobalKey _submenuPanelKey = GlobalKey();
   int? _hoveredIndex;
+  int? _pressedIndex;
   _TraySubmenuGroup? _activeSubmenu;
-  Size? _lastReportedMeasuredSize;
+
+  /// The submenu whose panel is currently in the tree. Lags [_activeSubmenu]
+  /// while the close animation plays, so the panel can fade out instead of
+  /// vanishing between two frames.
+  _TraySubmenuGroup? _renderedSubmenu;
   Timer? _submenuCloseTimer;
   bool _measurementScheduled = false;
   int? _lastMeasurementSignature;
+  TrayMenuGeometry? _lastReportedGeometry;
+  Size? _lastMainPanelSize;
+
+  /// Width and tile count of the rendered submenu, captured during build so
+  /// the region rect can be computed from target values instead of measuring
+  /// a panel that may be mid-animation.
+  double _renderedSubmenuWidth = 0;
+  int _renderedSubmenuTileCount = 0;
+
+  late final AnimationController _entranceController = AnimationController(
+    vsync: this,
+    duration: _entranceDuration,
+  );
+  late final AnimationController _submenuController = AnimationController(
+    vsync: this,
+    duration: _submenuOpenDuration,
+    reverseDuration: _submenuCloseDuration,
+  );
+
+  late final Animation<double> _entranceOpacity = CurvedAnimation(
+    parent: _entranceController,
+    curve: Curves.easeOutCubic,
+  );
+  late final Animation<Offset> _entranceSlide = Tween<Offset>(
+    begin: const Offset(0, 0.02),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(
+    parent: _entranceController,
+    curve: Curves.easeOutCubic,
+  ));
+  late final Animation<double> _submenuOpacity = CurvedAnimation(
+    parent: _submenuController,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeIn,
+  );
+  late final Animation<Offset> _submenuSlide = Tween<Offset>(
+    begin: const Offset(-0.03, 0),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(
+    parent: _submenuController,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeIn,
+  ));
+
+  @override
+  void initState() {
+    super.initState();
+    _submenuController.addStatusListener(_handleSubmenuAnimationStatus);
+    if (widget.revealTick > 0) {
+      _entranceController.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(TrayMenuContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.revealTick != oldWidget.revealTick && widget.revealTick > 0) {
+      _entranceController.forward(from: 0);
+    }
+  }
 
   @override
   void dispose() {
     _submenuCloseTimer?.cancel();
+    _entranceController.dispose();
+    _submenuController.dispose();
     super.dispose();
+  }
+
+  void _handleSubmenuAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed && _renderedSubmenu != null) {
+      setState(() => _renderedSubmenu = null);
+    }
   }
 
   /// Schedule submenu close with a short delay.
@@ -854,8 +1108,9 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
     _submenuCloseTimer?.cancel();
     _submenuCloseTimer = Timer(const Duration(milliseconds: 280), () {
       if (!mounted) return;
-      if (_activeSubmenu != null) {
+      if (_activeSubmenu != null || _renderedSubmenu != null) {
         setState(() => _activeSubmenu = null);
+        _submenuController.reverse();
       }
     });
   }
@@ -865,6 +1120,62 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
   void _cancelSubmenuClose() {
     _submenuCloseTimer?.cancel();
     _submenuCloseTimer = null;
+  }
+
+  void _openSubmenu(_TraySubmenuGroup group) {
+    _cancelSubmenuClose();
+    if (_activeSubmenu == group && _renderedSubmenu == group) {
+      return;
+    }
+    setState(() => _activeSubmenu = group);
+    unawaited(_openSubmenuSequenced(group));
+  }
+
+  /// Grow the native window first, paint the submenu only once the platform
+  /// has acknowledged. The fade-in fully masks the sub-frame resize latency,
+  /// and the ordering is what guarantees the flyout can never be clipped by a
+  /// window that has not caught up yet.
+  Future<void> _openSubmenuSequenced(_TraySubmenuGroup group) async {
+    final mainSize = _lastMainPanelSize;
+    if (mainSize != null && mounted) {
+      final isDark = FluentTheme.of(context).brightness == Brightness.dark;
+      final labelStyle =
+          DefaultTextStyle.of(context).style.merge(_menuLabelBaseStyle);
+      final specs = _getSubmenuSpecs(group, isDark);
+      final submenuWidth = _resolveMenuWidth(
+        context,
+        specs
+            .map((spec) =>
+                _MenuWidthSpec(label: spec.title, chrome: _menuTileChrome))
+            .toList(growable: false),
+        labelStyle,
+      );
+      final submenuHeight =
+          specs.length * _menuTileHeight + _panelVerticalChrome;
+      final target = TrayMenuGeometry(
+        envelope: Size(
+          mainSize.width + _submenuGap + submenuWidth,
+          math.max(
+            mainSize.height,
+            _resolveSubmenuOffset(group) + submenuHeight,
+          ),
+        ),
+        mainPanel: mainSize,
+      );
+      // A refused resize still falls through to painting: a briefly clipped
+      // submenu beats one that never appears, and the retry loop repairs the
+      // window size moments later.
+      await widget.onEnsureContentSpace(target);
+    }
+
+    if (!mounted || _activeSubmenu != group) {
+      // The user moved on while the window was growing.
+      return;
+    }
+    setState(() => _renderedSubmenu = group);
+    // From zero this is the entrance; from a partial close it resumes, and a
+    // group switch mid-flight just keeps whatever opacity is on screen.
+    _submenuController.forward();
   }
 
   bool get _isChinese =>
@@ -909,7 +1220,9 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
       ],
       resolvedLabelStyle,
     );
-    final submenuSpecs = _getActiveSubmenuSpecs(isDark);
+    final submenuSpecs = _renderedSubmenu == null
+        ? null
+        : _getSubmenuSpecs(_renderedSubmenu!, isDark);
     final submenuWidth = submenuSpecs == null
         ? 0.0
         : _resolveMenuWidth(
@@ -922,13 +1235,16 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
                 .toList(growable: false),
             resolvedLabelStyle,
           );
-    final submenuOffset = _resolveSubmenuOffset(_activeSubmenu);
-    _scheduleMeasuredSizeReport(
-      Object.hash(
+    final submenuOffset = _resolveSubmenuOffset(_renderedSubmenu);
+    _renderedSubmenuWidth = submenuWidth;
+    _renderedSubmenuTileCount = submenuSpecs?.length ?? 0;
+    _scheduleGeometryReport(
+      measurementSignature: Object.hash(
         mainMenuWidth,
         submenuWidth,
         submenuOffset,
         submenuSpecs?.length ?? 0,
+        widget.activeTasks.length,
       ),
     );
 
@@ -948,147 +1264,185 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
           });
           _scheduleSubmenuClose();
         },
-        child: KeyedSubtree(
-          key: _layoutKey,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildMenuPanel(
-                panelKey: _mainPanelKey,
-                width: mainMenuWidth,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildMenuTile(
-                      spec: _MenuActionSpec(
-                        index: _showWindowIndex,
-                        icon: CustomIcons.FluentIcons.window_20,
-                        title: t.trayMenuShowWindowTitle,
-                        iconColor: const Color(0xFF78C4FF),
-                        onTap: widget.isBusy
-                            ? null
-                            : () {
-                                unawaited(widget.onShowWindow());
-                              },
+        child: FadeTransition(
+          opacity: _entranceOpacity,
+          child: SlideTransition(
+            position: _entranceSlide,
+            child: NotificationListener<SizeChangedLayoutNotification>(
+              onNotification: (_) {
+                _forceGeometryReport();
+                return true;
+              },
+              child: SizeChangedLayoutNotifier(
+                child: KeyedSubtree(
+                  key: _layoutKey,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildMenuPanel(
+                        panelKey: _mainPanelKey,
+                        width: mainMenuWidth,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildMenuTile(
+                              spec: _MenuActionSpec(
+                                index: _showWindowIndex,
+                                icon: CustomIcons.FluentIcons.window_20,
+                                title: t.trayMenuShowWindowTitle,
+                                iconColor: const Color(0xFF78C4FF),
+                                onTap: widget.isBusy
+                                    ? null
+                                    : () {
+                                        unawaited(widget.onShowWindow());
+                                      },
+                              ),
+                              closeSubmenuOnEnter: true,
+                            ),
+                            _buildMenuTile(
+                              spec: _MenuActionSpec(
+                                index: _createDownloadIndex,
+                                icon: CustomIcons.FluentIcons.add_20,
+                                title: _createDownloadTitle,
+                                iconColor: const Color(0xFFF2C879),
+                                onTap: widget.isBusy
+                                    ? null
+                                    : () {
+                                        unawaited(widget.onCreateDownload());
+                                      },
+                              ),
+                              closeSubmenuOnEnter: true,
+                            ),
+                            _buildMenuTile(
+                              spec: _MenuActionSpec(
+                                index: _activeTasksGroupIndex,
+                                icon: CustomIcons.FluentIcons.arrow_download_20,
+                                title: _activeTasksGroupTitle,
+                                iconColor: const Color(0xFF8FD8A9),
+                                onTap: () => _toggleSubmenu(
+                                    _TraySubmenuGroup.activeTasks),
+                              ),
+                              trailing: Icon(
+                                CustomIcons.FluentIcons.chevron_right_20,
+                                size: 10,
+                                color: const Color(0xFF9B9B9B),
+                              ),
+                              isSelected: _activeSubmenu ==
+                                  _TraySubmenuGroup.activeTasks,
+                              submenuToActivateOnEnter:
+                                  _TraySubmenuGroup.activeTasks,
+                            ),
+                            _buildMenuTile(
+                              spec: _MenuActionSpec(
+                                index: _foldersGroupIndex,
+                                icon: CustomIcons.FluentIcons.folder_open_20,
+                                title: _foldersGroupTitle,
+                                iconColor: const Color(0xFF78C4FF),
+                                onTap: () =>
+                                    _toggleSubmenu(_TraySubmenuGroup.folders),
+                              ),
+                              trailing: Icon(
+                                CustomIcons.FluentIcons.chevron_right_20,
+                                size: 10,
+                                color: const Color(0xFF9B9B9B),
+                              ),
+                              isSelected:
+                                  _activeSubmenu == _TraySubmenuGroup.folders,
+                              submenuToActivateOnEnter:
+                                  _TraySubmenuGroup.folders,
+                            ),
+                            _buildMenuTile(
+                              spec: _MenuActionSpec(
+                                index: _linksGroupIndex,
+                                icon: CustomIcons.FluentIcons.link_20,
+                                title: _linksGroupTitle,
+                                iconColor: const Color(0xFF8FD8A9),
+                                onTap: () =>
+                                    _toggleSubmenu(_TraySubmenuGroup.links),
+                              ),
+                              trailing: Icon(
+                                CustomIcons.FluentIcons.chevron_right_20,
+                                size: 10,
+                                color: const Color(0xFF9B9B9B),
+                              ),
+                              isSelected:
+                                  _activeSubmenu == _TraySubmenuGroup.links,
+                              submenuToActivateOnEnter: _TraySubmenuGroup.links,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Container(
+                                height: 1,
+                                color: AppTheme.borderSubtle,
+                              ),
+                            ),
+                            _buildExitBar(
+                              title: t.trayMenuExitTitle,
+                              onTap: widget.isBusy
+                                  ? null
+                                  : () {
+                                      unawaited(widget.onExit());
+                                    },
+                            ),
+                          ],
+                        ),
                       ),
-                      closeSubmenuOnEnter: true,
-                    ),
-                    _buildMenuTile(
-                      spec: _MenuActionSpec(
-                        index: _createDownloadIndex,
-                        icon: CustomIcons.FluentIcons.add_20,
-                        title: _createDownloadTitle,
-                        iconColor: const Color(0xFFF2C879),
-                        onTap: widget.isBusy
-                            ? null
-                            : () {
-                                unawaited(widget.onCreateDownload());
-                              },
-                      ),
-                      closeSubmenuOnEnter: true,
-                    ),
-                    _buildMenuTile(
-                      spec: _MenuActionSpec(
-                        index: _activeTasksGroupIndex,
-                        icon: CustomIcons.FluentIcons.arrow_download_20,
-                        title: _activeTasksGroupTitle,
-                        iconColor: const Color(0xFF8FD8A9),
-                        onTap: () =>
-                            _toggleSubmenu(_TraySubmenuGroup.activeTasks),
-                      ),
-                      trailing: Icon(
-                        CustomIcons.FluentIcons.chevron_right_20,
-                        size: 10,
-                        color: const Color(0xFF9B9B9B),
-                      ),
-                      isSelected:
-                          _activeSubmenu == _TraySubmenuGroup.activeTasks,
-                      submenuToActivateOnEnter: _TraySubmenuGroup.activeTasks,
-                    ),
-                    _buildMenuTile(
-                      spec: _MenuActionSpec(
-                        index: _foldersGroupIndex,
-                        icon: CustomIcons.FluentIcons.folder_open_20,
-                        title: _foldersGroupTitle,
-                        iconColor: const Color(0xFF78C4FF),
-                        onTap: () => _toggleSubmenu(_TraySubmenuGroup.folders),
-                      ),
-                      trailing: Icon(
-                        CustomIcons.FluentIcons.chevron_right_20,
-                        size: 10,
-                        color: const Color(0xFF9B9B9B),
-                      ),
-                      isSelected: _activeSubmenu == _TraySubmenuGroup.folders,
-                      submenuToActivateOnEnter: _TraySubmenuGroup.folders,
-                    ),
-                    _buildMenuTile(
-                      spec: _MenuActionSpec(
-                        index: _linksGroupIndex,
-                        icon: CustomIcons.FluentIcons.link_20,
-                        title: _linksGroupTitle,
-                        iconColor: const Color(0xFF8FD8A9),
-                        onTap: () => _toggleSubmenu(_TraySubmenuGroup.links),
-                      ),
-                      trailing: Icon(
-                        CustomIcons.FluentIcons.chevron_right_20,
-                        size: 10,
-                        color: const Color(0xFF9B9B9B),
-                      ),
-                      isSelected: _activeSubmenu == _TraySubmenuGroup.links,
-                      submenuToActivateOnEnter: _TraySubmenuGroup.links,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Container(
-                        height: 1,
-                        color: AppTheme.borderSubtle,
-                      ),
-                    ),
-                    _buildExitBar(
-                      title: t.trayMenuExitTitle,
-                      onTap: widget.isBusy
-                          ? null
-                          : () {
-                              unawaited(widget.onExit());
-                            },
-                    ),
-                  ],
+                      if (submenuSpecs != null) ...[
+                        const SizedBox(width: _submenuGap),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Animating the offset makes switching between groups
+                            // read as one cascade gliding along the menu instead
+                            // of a new panel popping into existence.
+                            AnimatedContainer(
+                              duration: _submenuOpenDuration,
+                              curve: Curves.easeOutCubic,
+                              height: submenuOffset,
+                              // The region is computed from target values, but
+                              // re-report once the glide settles in case layout
+                              // truth drifted from the analytic rect.
+                              onEnd: _reportPanelRects,
+                            ),
+                            FadeTransition(
+                              opacity: _submenuOpacity,
+                              child: SlideTransition(
+                                position: _submenuSlide,
+                                child: _buildMenuPanel(
+                                  panelKey: _submenuPanelKey,
+                                  width: submenuWidth,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      for (final spec in submenuSpecs)
+                                        _buildMenuTile(
+                                          spec: spec,
+                                          closeSubmenuOnEnter: false,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
-              if (submenuSpecs != null) ...[
-                const SizedBox(width: _submenuGap),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(height: submenuOffset),
-                    _buildMenuPanel(
-                      panelKey: _submenuPanelKey,
-                      width: submenuWidth,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final spec in submenuSpecs)
-                            _buildMenuTile(
-                              spec: spec,
-                              closeSubmenuOnEnter: false,
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  void _scheduleMeasuredSizeReport(int measurementSignature) {
+  void _scheduleGeometryReport({required int measurementSignature}) {
     if (_measurementScheduled ||
         _lastMeasurementSignature == measurementSignature) {
       return;
@@ -1096,33 +1450,98 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
     _measurementScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _measurementScheduled = false;
-      if (!mounted) {
-        return;
-      }
-      final context = _layoutKey.currentContext;
-      if (context == null) {
-        return;
-      }
-      final renderObject = context.findRenderObject();
-      if (renderObject is! RenderBox || !renderObject.hasSize) {
-        return;
-      }
-      final size = renderObject.size;
-      _lastMeasurementSignature = measurementSignature;
-
-      final previous = _lastReportedMeasuredSize;
-      if (previous != null &&
-          (previous.width - size.width).abs() <= 0.5 &&
-          (previous.height - size.height).abs() <= 0.5) {
-        return;
-      }
-      _lastReportedMeasuredSize = size;
-      widget.onDesiredContentSizeChanged(size);
+      _measureAndReport(measurementSignature);
     });
   }
 
-  List<_MenuActionSpec>? _getActiveSubmenuSpecs(bool isDark) {
-    switch (_activeSubmenu) {
+  /// Re-measure regardless of the build signature. Fired by the layout-change
+  /// notifier: a cold engine swaps in its real font a few frames after first
+  /// paint, which changes panel sizes without any rebuild, so signature-based
+  /// scheduling alone would leave the window and region matching stale metrics.
+  void _forceGeometryReport() {
+    _lastMeasurementSignature = null;
+    if (_measurementScheduled) {
+      return;
+    }
+    _measurementScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measurementScheduled = false;
+      _measureAndReport(null);
+    });
+  }
+
+  void _measureAndReport(int? measurementSignature) {
+    if (!mounted) {
+      return;
+    }
+    final panelBox = _mainPanelKey.currentContext?.findRenderObject();
+    final layoutBox = _layoutKey.currentContext?.findRenderObject();
+    if (panelBox is! RenderBox ||
+        !panelBox.hasSize ||
+        layoutBox is! RenderBox ||
+        !layoutBox.hasSize) {
+      return;
+    }
+    if (measurementSignature != null) {
+      _lastMeasurementSignature = measurementSignature;
+    }
+
+    final mainPanelSize = panelBox.size;
+    _lastMainPanelSize = mainPanelSize;
+    final geometry = TrayMenuGeometry(
+      envelope: layoutBox.size,
+      mainPanel: mainPanelSize,
+    );
+    if (!geometry.closeTo(_lastReportedGeometry)) {
+      _lastReportedGeometry = geometry;
+      widget.onGeometryChanged(geometry);
+    }
+    _reportPanelRects();
+  }
+
+  /// Window-space rectangles of the visible panels, for the native window
+  /// region (painting and hit-testing both clip to it).
+  void _reportPanelRects() {
+    if (!mounted) {
+      return;
+    }
+    final mainBox = _mainPanelKey.currentContext?.findRenderObject();
+    if (mainBox is! RenderBox || !mainBox.hasSize || !mainBox.attached) {
+      return;
+    }
+    // Origin is the window inset constant, not localToGlobal: the entrance
+    // slide and the submenu glide are transforms, and a rect measured through
+    // them captures wherever the animation happened to be that frame.
+    final mainRect = Offset(
+          kTrayMenuWindowInsets.left,
+          kTrayMenuWindowInsets.top,
+        ) &
+        mainBox.size;
+    final rects = <Rect>[mainRect];
+
+    final group = _renderedSubmenu;
+    if (group != null && _renderedSubmenuTileCount > 0) {
+      // The submenu rect is derived from target values, never measured: the
+      // offset animation between groups means a measured rect can capture the
+      // panel mid-flight, and a region built from that snapshot sliced the
+      // settled panel apart at the old position.
+      final panelHeight =
+          _renderedSubmenuTileCount * _menuTileHeight + _panelVerticalChrome;
+      rects.add(Rect.fromLTWH(
+        mainRect.right + _submenuGap,
+        mainRect.top + _resolveSubmenuOffset(group),
+        _renderedSubmenuWidth,
+        panelHeight,
+      ));
+    }
+    widget.onPanelRectsChanged(rects);
+  }
+
+  List<_MenuActionSpec> _getSubmenuSpecs(
+    _TraySubmenuGroup group,
+    bool isDark,
+  ) {
+    switch (group) {
       case _TraySubmenuGroup.activeTasks:
         if (widget.activeTasks.isEmpty) {
           return [
@@ -1227,8 +1646,6 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
                   },
           ),
         ];
-      case null:
-        return null;
     }
   }
 
@@ -1270,10 +1687,13 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
   }
 
   void _toggleSubmenu(_TraySubmenuGroup group) {
-    _cancelSubmenuClose();
-    setState(() {
-      _activeSubmenu = _activeSubmenu == group ? null : group;
-    });
+    if (_activeSubmenu == group) {
+      _cancelSubmenuClose();
+      setState(() => _activeSubmenu = null);
+      _submenuController.reverse();
+      return;
+    }
+    _openSubmenu(group);
   }
 
   Widget _buildMenuPanel({
@@ -1345,6 +1765,8 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
     const iconSize = 13.0;
     final hoverColor = AppTheme.surfaceCardHover;
 
+    final isPressed = _pressedIndex == spec.index;
+
     return MouseRegion(
       onEnter: (_) {
         _cancelSubmenuClose();
@@ -1362,64 +1784,91 @@ class _TrayMenuContentState extends State<TrayMenuContent> {
           _scheduleSubmenuClose();
           return;
         }
-        final needsUpdate =
-            _hoveredIndex != spec.index || _activeSubmenu != nextSubmenu;
-        if (!needsUpdate) {
+        if (nextSubmenu != null && nextSubmenu != _activeSubmenu) {
+          _openSubmenu(nextSubmenu);
+        }
+        if (_hoveredIndex != spec.index) {
+          setState(() => _hoveredIndex = spec.index);
+        }
+      },
+      onExit: (_) {
+        if (_hoveredIndex != spec.index && _pressedIndex != spec.index) {
           return;
         }
         setState(() {
-          _hoveredIndex = spec.index;
-          _activeSubmenu = nextSubmenu;
+          if (_hoveredIndex == spec.index) _hoveredIndex = null;
+          if (_pressedIndex == spec.index) _pressedIndex = null;
         });
-      },
-      onExit: (_) {
-        if (_hoveredIndex != spec.index) {
-          return;
-        }
-        setState(() => _hoveredIndex = null);
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: spec.onTap,
-        child: Container(
-          margin: EdgeInsets.zero,
-          padding: tilePadding,
-          decoration: BoxDecoration(
-            color: isHighlighted ? hoverColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(tileRadius),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: iconBoxSize,
-                height: iconBoxSize,
-                decoration: BoxDecoration(
-                  color: spec.iconColor
-                      .withValues(alpha: isHighlighted ? 0.25 : 0.15),
-                  borderRadius: BorderRadius.circular(iconRadius),
+        onTapDown: isDisabled
+            ? null
+            : (_) => setState(() => _pressedIndex = spec.index),
+        onTapUp: (_) {
+          if (_pressedIndex == spec.index) {
+            setState(() => _pressedIndex = null);
+          }
+        },
+        onTapCancel: () {
+          if (_pressedIndex == spec.index) {
+            setState(() => _pressedIndex = null);
+          }
+        },
+        child: AnimatedScale(
+          scale: isPressed ? 0.97 : 1.0,
+          duration: _hoverDuration,
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: _hoverDuration,
+            curve: Curves.easeOutCubic,
+            margin: EdgeInsets.zero,
+            padding: tilePadding,
+            decoration: BoxDecoration(
+              color: isHighlighted ? hoverColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(tileRadius),
+            ),
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: _hoverDuration,
+                  curve: Curves.easeOutCubic,
+                  width: iconBoxSize,
+                  height: iconBoxSize,
+                  decoration: BoxDecoration(
+                    color: spec.iconColor
+                        .withValues(alpha: isHighlighted ? 0.25 : 0.15),
+                    borderRadius: BorderRadius.circular(iconRadius),
+                  ),
+                  child: Icon(
+                    spec.icon,
+                    size: iconSize,
+                    color: isDisabled
+                        ? AppTheme.textDisabled
+                        : spec.iconColor.withValues(alpha: 0.95),
+                  ),
                 ),
-                child: Icon(
-                  spec.icon,
-                  size: iconSize,
-                  color: isDisabled
-                      ? AppTheme.textDisabled
-                      : spec.iconColor.withValues(alpha: 0.95),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    spec.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: labelStyle,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  spec.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: labelStyle,
-                ),
-              ),
-              if (trailing != null) ...[
-                const SizedBox(width: 6),
-                trailing,
+                if (trailing != null) ...[
+                  const SizedBox(width: 6),
+                  AnimatedSlide(
+                    offset: isHighlighted ? const Offset(0.12, 0) : Offset.zero,
+                    duration: _hoverDuration,
+                    curve: Curves.easeOutCubic,
+                    child: trailing,
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

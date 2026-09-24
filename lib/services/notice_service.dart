@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models/notice_model.dart';
 import '../utils/constants.dart';
 import 'app_logger_service.dart';
+import 'app_power_mode_service.dart';
 import 'client_config_service.dart';
 
 class NoticeService extends ChangeNotifier {
@@ -14,6 +15,7 @@ class NoticeService extends ChangeNotifier {
 
   final AppLoggerService? _logger;
   final ClientConfigService _config;
+  final AppPowerModeService _powerMode = AppPowerModeService();
 
   List<Notice> _notices = [];
   bool _isLoading = false;
@@ -24,7 +26,8 @@ class NoticeService extends ChangeNotifier {
   String? _onlineSessionId;
   int? _onlineUserCount;
   DateTime? _onlineLastSeenAt;
-  bool _isBackgroundMode = false;
+  AppPowerMode _currentPowerMode = AppPowerModeService().mode;
+  bool _heartbeatRequested = false;
 
   List<Notice> get notices => _notices;
   bool get isLoading => _isLoading;
@@ -32,7 +35,7 @@ class NoticeService extends ChangeNotifier {
   DateTime? get lastFetchTime => _lastFetchTime;
   int? get onlineUserCount => _onlineUserCount;
   DateTime? get onlineLastSeenAt => _onlineLastSeenAt;
-  bool get isBackgroundMode => _isBackgroundMode;
+  bool get isBackgroundMode => _currentPowerMode != AppPowerMode.active;
 
   List<Notice> get pinnedNotices =>
       _notices.where((n) => n.pinned && n.isActive).toList();
@@ -45,9 +48,11 @@ class NoticeService extends ChangeNotifier {
   })  : _logger = logger,
         _config = config ?? ClientConfigService() {
     _config.addListener(_handleConfigChanged);
+    _powerMode.addListener(_handlePowerModeChanged);
   }
 
   void startOnlineHeartbeat() {
+    _heartbeatRequested = true;
     if (!_canSendOnlineHeartbeat()) {
       stopOnlineHeartbeat();
       return;
@@ -58,23 +63,35 @@ class NoticeService extends ChangeNotifier {
     _startOnlineHeartbeatTimer(sendImmediately: true);
   }
 
-  void setBackgroundMode(bool isBackgroundMode) {
-    if (_isBackgroundMode == isBackgroundMode) {
+  void _handlePowerModeChanged() {
+    final next = _powerMode.mode;
+    if (_currentPowerMode == next) return;
+
+    final wasUltraLite = _currentPowerMode == AppPowerMode.ultraLite;
+    _currentPowerMode = next;
+
+    // 极致精简模式下在线心跳完全停掉：它纯粹是统计用途，
+    // 没人看着窗口的时候不值得为它保活网络栈。
+    if (next == AppPowerMode.ultraLite) {
+      _onlineHeartbeatTimer?.cancel();
+      _onlineHeartbeatTimer = null;
       return;
     }
 
-    _isBackgroundMode = isBackgroundMode;
-    if (!_canSendOnlineHeartbeat()) {
+    if (!_heartbeatRequested || !_canSendOnlineHeartbeat()) {
       stopOnlineHeartbeat();
       return;
     }
 
-    if (_onlineHeartbeatTimer != null) {
-      _startOnlineHeartbeatTimer(sendImmediately: !isBackgroundMode);
+    if (wasUltraLite || _onlineHeartbeatTimer != null) {
+      _startOnlineHeartbeatTimer(
+        sendImmediately: next == AppPowerMode.active,
+      );
     }
   }
 
   void stopOnlineHeartbeat() {
+    _heartbeatRequested = false;
     final hadOnlineState = _onlineHeartbeatTimer != null ||
         _onlineSessionId != null ||
         _onlineUserCount != null ||
@@ -182,10 +199,15 @@ class NoticeService extends ChangeNotifier {
 
   void _startOnlineHeartbeatTimer({required bool sendImmediately}) {
     _onlineHeartbeatTimer?.cancel();
+    if (_currentPowerMode == AppPowerMode.ultraLite) {
+      _onlineHeartbeatTimer = null;
+      return;
+    }
+
     _onlineHeartbeatTimer = Timer.periodic(
-      _isBackgroundMode
-          ? _backgroundHeartbeatInterval
-          : _foregroundHeartbeatInterval,
+      _currentPowerMode == AppPowerMode.active
+          ? _foregroundHeartbeatInterval
+          : _backgroundHeartbeatInterval,
       (_) => unawaited(sendOnlineHeartbeat()),
     );
 
@@ -197,6 +219,7 @@ class NoticeService extends ChangeNotifier {
   @override
   void dispose() {
     _config.removeListener(_handleConfigChanged);
+    _powerMode.removeListener(_handlePowerModeChanged);
     _onlineHeartbeatTimer?.cancel();
     _onlineHeartbeatTimer = null;
     super.dispose();
@@ -215,7 +238,7 @@ class NoticeService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      const channel = AppConstants.channel;
+      final channel = AppConstants.channel;
       final uri = Uri.parse('$_noticeApiBase/notices').replace(
         queryParameters: {
           'surface': 'app',

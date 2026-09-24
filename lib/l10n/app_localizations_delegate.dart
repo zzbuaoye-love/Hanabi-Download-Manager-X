@@ -626,6 +626,33 @@ class PluginAppLocalizations extends AppLocalizations {
       'settingsAutoStartFixedMessage', _fallback.settingsAutoStartFixedMessage);
 
   @override
+  String get settingsSectionBackgroundPower => _string(
+      'settingsSectionBackgroundPower',
+      _fallback.settingsSectionBackgroundPower);
+
+  @override
+  String get settingsUltraLiteTitle =>
+      _string('settingsUltraLiteTitle', _fallback.settingsUltraLiteTitle);
+
+  @override
+  String get settingsUltraLiteSubtitle =>
+      _string('settingsUltraLiteSubtitle', _fallback.settingsUltraLiteSubtitle);
+
+  @override
+  String get settingsUltraLiteIdleTitle => _string(
+      'settingsUltraLiteIdleTitle', _fallback.settingsUltraLiteIdleTitle);
+
+  @override
+  String get settingsUltraLiteIdleSubtitle => _string(
+      'settingsUltraLiteIdleSubtitle', _fallback.settingsUltraLiteIdleSubtitle);
+
+  @override
+  String settingsUltraLiteIdleMinutesLabel(Object minutes) => _format(
+      'settingsUltraLiteIdleMinutesLabel',
+      {'minutes': minutes},
+      _fallback.settingsUltraLiteIdleMinutesLabel(minutes));
+
+  @override
   String get settingsSectionBehavior =>
       _string('settingsSectionBehavior', _fallback.settingsSectionBehavior);
 
@@ -1099,6 +1126,165 @@ class PluginAppLocalizations extends AppLocalizations {
   String get settingsDownloadCardHttpBadgeSubtitle => _string(
       'settingsDownloadCardHttpBadgeSubtitle',
       _fallback.settingsDownloadCardHttpBadgeSubtitle);
+
+  @override
+  String get settingsGeoBadgeTitle =>
+      _string('settingsGeoBadgeTitle', _fallback.settingsGeoBadgeTitle);
+
+  @override
+  String get settingsGeoBadgeSubtitle =>
+      _string('settingsGeoBadgeSubtitle', _fallback.settingsGeoBadgeSubtitle);
+
+  @override
+  String get settingsGeoSourceTitle =>
+      _string('settingsGeoSourceTitle', _fallback.settingsGeoSourceTitle);
+
+  @override
+  String get settingsGeoSourceSubtitle =>
+      _string('settingsGeoSourceSubtitle', _fallback.settingsGeoSourceSubtitle);
+
+  @override
+  String get settingsGeoSourceOnline =>
+      _string('settingsGeoSourceOnline', _fallback.settingsGeoSourceOnline);
+
+  @override
+  String get settingsGeoSourceOffline =>
+      _string('settingsGeoSourceOffline', _fallback.settingsGeoSourceOffline);
+
+  @override
+  String get settingsGeoPrivacyNotice =>
+      _string('settingsGeoPrivacyNotice', _fallback.settingsGeoPrivacyNotice);
+
+  @override
+  String get settingsGeoOfflinePackTitle => _string(
+      'settingsGeoOfflinePackTitle', _fallback.settingsGeoOfflinePackTitle);
+
+  @override
+  String get settingsGeoOfflinePackMissing => _string(
+      'settingsGeoOfflinePackMissing', _fallback.settingsGeoOfflinePackMissing);
+
+  @override
+  String settingsGeoOfflinePackReady(String size) => _format(
+      'settingsGeoOfflinePackReady',
+      {'size': size},
+      _fallback.settingsGeoOfflinePackReady(size));
+
+  @override
+  String get settingsGeoOfflinePackDownload => _string(
+      'settingsGeoOfflinePackDownload',
+      _fallback.settingsGeoOfflinePackDownload);
+
+  @override
+  String settingsGeoOfflinePackDownloading(int percent) => _format(
+      'settingsGeoOfflinePackDownloading',
+      {'percent': percent},
+      _fallback.settingsGeoOfflinePackDownloading(percent));
+
+  @override
+  String get settingsGeoOfflinePackRemove => _string(
+      'settingsGeoOfflinePackRemove', _fallback.settingsGeoOfflinePackRemove);
+
+  @override
+  String settingsGeoOfflinePackFailed(String error) => _format(
+      'settingsGeoOfflinePackFailed',
+      {'error': error},
+      _fallback.settingsGeoOfflinePackFailed(error));
+
+  @override
+  String get settingsGeoOfflinePackSourceNote => _string(
+      'settingsGeoOfflinePackSourceNote',
+      _fallback.settingsGeoOfflinePackSourceNote);
+
+  @override
+  String get geoBadgeLocalEndpoint =>
+      _string('geoBadgeLocalEndpoint', _fallback.geoBadgeLocalEndpoint);
+
+  @override
+  String get settingsGeoAccuracyNoticeTitle => _string(
+      'settingsGeoAccuracyNoticeTitle',
+      _fallback.settingsGeoAccuracyNoticeTitle);
+
+  @override
+  String get settingsGeoAccuracyNotice =>
+      _string('settingsGeoAccuracyNotice', _fallback.settingsGeoAccuracyNotice);
+
+  @override
+  String get geoBadgeEgressRuleBased =>
+      _string('geoBadgeEgressRuleBased', _fallback.geoBadgeEgressRuleBased);
+
+  @override
+  String get settingsGeoPackUrlTitle =>
+      _string('settingsGeoPackUrlTitle', _fallback.settingsGeoPackUrlTitle);
+
+  @override
+  String get settingsGeoPackUrlSubtitle => _string(
+      'settingsGeoPackUrlSubtitle', _fallback.settingsGeoPackUrlSubtitle);
+
+  @override
+  String get settingsGeoPackUrlPlaceholder => _string(
+      'settingsGeoPackUrlPlaceholder', _fallback.settingsGeoPackUrlPlaceholder);
+
+  @override
+  String get settingsGeoPackUrlSave =>
+      _string('settingsGeoPackUrlSave', _fallback.settingsGeoPackUrlSave);
+
+  @override
+  String get settingsGeoPackUrlReset =>
+      _string('settingsGeoPackUrlReset', _fallback.settingsGeoPackUrlReset);
+
+  @override
+  String get settingsGeoPackUrlInvalid =>
+      _string('settingsGeoPackUrlInvalid', _fallback.settingsGeoPackUrlInvalid);
+
+  @override
+  String get settingsGeoPackUrlSaved =>
+      _string('settingsGeoPackUrlSaved', _fallback.settingsGeoPackUrlSaved);
+
+  @override
+  String get settingsGeoPackPresetLabel => _string(
+      'settingsGeoPackPresetLabel', _fallback.settingsGeoPackPresetLabel);
+
+  @override
+  String get settingsGeoPackPresetJsdelivr => _string(
+      'settingsGeoPackPresetJsdelivr', _fallback.settingsGeoPackPresetJsdelivr);
+
+  @override
+  String get settingsGeoPackPresetUnpkg => _string(
+      'settingsGeoPackPresetUnpkg', _fallback.settingsGeoPackPresetUnpkg);
+
+  @override
+  String get settingsGeoPackImportTitle => _string(
+      'settingsGeoPackImportTitle', _fallback.settingsGeoPackImportTitle);
+
+  @override
+  String get settingsGeoPackImportSubtitle => _string(
+      'settingsGeoPackImportSubtitle', _fallback.settingsGeoPackImportSubtitle);
+
+  @override
+  String get settingsGeoPackImportButton => _string(
+      'settingsGeoPackImportButton', _fallback.settingsGeoPackImportButton);
+
+  @override
+  String get settingsGeoPackImportValidating => _string(
+      'settingsGeoPackImportValidating',
+      _fallback.settingsGeoPackImportValidating);
+
+  @override
+  String settingsGeoPackImportSuccess(String size) => _format(
+      'settingsGeoPackImportSuccess',
+      {'size': size},
+      _fallback.settingsGeoPackImportSuccess(size));
+
+  @override
+  String settingsGeoPackImportFailed(String error) => _format(
+      'settingsGeoPackImportFailed',
+      {'error': error},
+      _fallback.settingsGeoPackImportFailed(error));
+
+  @override
+  String get settingsGeoPackImportPickerTitle => _string(
+      'settingsGeoPackImportPickerTitle',
+      _fallback.settingsGeoPackImportPickerTitle);
 
   @override
   String get settingsDefaultUserAgentTitle => _string(
@@ -3439,6 +3625,54 @@ class PluginAppLocalizations extends AppLocalizations {
       'downloadIntentUnsupportedType',
       {'type': type},
       _fallback.downloadIntentUnsupportedType(type));
+
+  @override
+  String get addDownloadSupportedProtocolsLabel => _string(
+      'addDownloadSupportedProtocolsLabel',
+      _fallback.addDownloadSupportedProtocolsLabel);
+
+  @override
+  String get addDownloadProtocolHttp =>
+      _string('addDownloadProtocolHttp', _fallback.addDownloadProtocolHttp);
+
+  @override
+  String get addDownloadProtocolMagnet =>
+      _string('addDownloadProtocolMagnet', _fallback.addDownloadProtocolMagnet);
+
+  @override
+  String get addDownloadProtocolTorrentFile => _string(
+      'addDownloadProtocolTorrentFile',
+      _fallback.addDownloadProtocolTorrentFile);
+
+  @override
+  String get addDownloadProtocolEd2k =>
+      _string('addDownloadProtocolEd2k', _fallback.addDownloadProtocolEd2k);
+
+  @override
+  String get addDownloadProtocolResolver => _string(
+      'addDownloadProtocolResolver', _fallback.addDownloadProtocolResolver);
+
+  @override
+  String get addDownloadProtocolBuiltIn => _string(
+      'addDownloadProtocolBuiltIn', _fallback.addDownloadProtocolBuiltIn);
+
+  @override
+  String addDownloadProtocolProvidedBy(Object provider) => _format(
+      'addDownloadProtocolProvidedBy',
+      {'provider': provider},
+      _fallback.addDownloadProtocolProvidedBy(provider));
+
+  @override
+  String addDownloadIntentPluginReady(Object type, Object plugin) => _format(
+      'addDownloadIntentPluginReady',
+      {'type': type, 'plugin': plugin},
+      _fallback.addDownloadIntentPluginReady(type, plugin));
+
+  @override
+  String addDownloadIntentNoPlugin(Object type) => _format(
+      'addDownloadIntentNoPlugin',
+      {'type': type},
+      _fallback.addDownloadIntentNoPlugin(type));
 
   @override
   String addDownloadErrorAddFailed(Object error) => _format(
@@ -5798,6 +6032,54 @@ class PluginAppLocalizations extends AppLocalizations {
       _fallback.downloadBadgeConcurrencyCap(count));
 
   @override
+  String get geoBadgeResolving =>
+      _string('geoBadgeResolving', _fallback.geoBadgeResolving);
+
+  @override
+  String get geoBadgeUnknownCountry =>
+      _string('geoBadgeUnknownCountry', _fallback.geoBadgeUnknownCountry);
+
+  @override
+  String get geoBadgeFailed =>
+      _string('geoBadgeFailed', _fallback.geoBadgeFailed);
+
+  @override
+  String get geoBadgeDisabledHint =>
+      _string('geoBadgeDisabledHint', _fallback.geoBadgeDisabledHint);
+
+  @override
+  String get geoBadgeTooltipEgress =>
+      _string('geoBadgeTooltipEgress', _fallback.geoBadgeTooltipEgress);
+
+  @override
+  String get geoBadgeTooltipTarget =>
+      _string('geoBadgeTooltipTarget', _fallback.geoBadgeTooltipTarget);
+
+  @override
+  String get geoBadgeTooltipVia =>
+      _string('geoBadgeTooltipVia', _fallback.geoBadgeTooltipVia);
+
+  @override
+  String get geoBadgeTooltipDirect =>
+      _string('geoBadgeTooltipDirect', _fallback.geoBadgeTooltipDirect);
+
+  @override
+  String get geoBadgeUplink =>
+      _string('geoBadgeUplink', _fallback.geoBadgeUplink);
+
+  @override
+  String get geoBadgeDownlink =>
+      _string('geoBadgeDownlink', _fallback.geoBadgeDownlink);
+
+  @override
+  String get geoBadgeSourceOnlineTag =>
+      _string('geoBadgeSourceOnlineTag', _fallback.geoBadgeSourceOnlineTag);
+
+  @override
+  String get geoBadgeSourceOfflineTag =>
+      _string('geoBadgeSourceOfflineTag', _fallback.geoBadgeSourceOfflineTag);
+
+  @override
   String get downloadFailureHintAuth =>
       _string('downloadFailureHintAuth', _fallback.downloadFailureHintAuth);
 
@@ -5911,6 +6193,50 @@ class PluginAppLocalizations extends AppLocalizations {
   @override
   String get noticeOpenLink =>
       _string('noticeOpenLink', _fallback.noticeOpenLink);
+
+  @override
+  String get noticeViewCards =>
+      _string('noticeViewCards', _fallback.noticeViewCards);
+
+  @override
+  String get noticeViewSplit =>
+      _string('noticeViewSplit', _fallback.noticeViewSplit);
+
+  @override
+  String get noticeLevelInfo =>
+      _string('noticeLevelInfo', _fallback.noticeLevelInfo);
+
+  @override
+  String get noticeLevelSuccess =>
+      _string('noticeLevelSuccess', _fallback.noticeLevelSuccess);
+
+  @override
+  String get noticeLevelWarning =>
+      _string('noticeLevelWarning', _fallback.noticeLevelWarning);
+
+  @override
+  String get noticeLevelCritical =>
+      _string('noticeLevelCritical', _fallback.noticeLevelCritical);
+
+  @override
+  String get noticeEmptySubtitle =>
+      _string('noticeEmptySubtitle', _fallback.noticeEmptySubtitle);
+
+  @override
+  String get noticeSelectPromptTitle =>
+      _string('noticeSelectPromptTitle', _fallback.noticeSelectPromptTitle);
+
+  @override
+  String get noticeSelectPromptSubtitle => _string(
+      'noticeSelectPromptSubtitle', _fallback.noticeSelectPromptSubtitle);
+
+  @override
+  String get noticeCloseDetail =>
+      _string('noticeCloseDetail', _fallback.noticeCloseDetail);
+
+  @override
+  String noticeListHeader(Object count) => _format(
+      'noticeListHeader', {'count': count}, _fallback.noticeListHeader(count));
 
   @override
   String get settingsLogManagementSection => _string(

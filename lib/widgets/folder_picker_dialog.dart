@@ -2,6 +2,7 @@ import 'package:fluent_ui/fluent_ui.dart';
 import 'dart:io';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
+import 'package:win32/win32.dart';
 import '../theme/app_theme.dart';
 import '../services/quick_path_service.dart';
 import '../l10n/app_localizations.dart';
@@ -523,25 +524,22 @@ class _FolderPickerDialogState extends State<FolderPickerDialog> {
 
   Future<void> _loadDrives() async {
     if (!Platform.isWindows) return;
-    final candidates = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-        .split('')
-        .map((letter) => '$letter:\\')
-        .toList(growable: false);
-    final checks = await Future.wait(
-      candidates.map((drive) async {
-        try {
-          final exists = await Directory(drive)
-              .exists()
-              .timeout(const Duration(milliseconds: 500));
-          return exists ? drive : null;
-        } catch (_) {
-          return null;
-        }
-      }),
-    );
+
+    // Query Windows' logical-drive bitmask instead of touching all 26 drive
+    // roots. Directory.exists().timeout(...) does not cancel the underlying
+    // filesystem request, so an unavailable mapped/network drive can occupy an
+    // I/O worker indefinitely and make the picker (and widget tests) hang.
+    final mask = GetLogicalDrives().value;
+    final drives = <String>[];
+    for (var index = 0; index < 26; index++) {
+      if ((mask & (1 << index)) != 0) {
+        drives.add('${String.fromCharCode(65 + index)}:\\');
+      }
+    }
+
     if (!mounted) return;
     setState(() {
-      _drives = checks.whereType<String>().toList(growable: false);
+      _drives = List<String>.unmodifiable(drives);
     });
   }
 
@@ -814,7 +812,7 @@ class _FolderPickerDialogState extends State<FolderPickerDialog> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 680;
-            final showTypeColumn = constraints.maxWidth >= 620;
+            final showTypeColumn = !compact;
             return Container(
               color: AppTheme.bgBase,
               child: Row(

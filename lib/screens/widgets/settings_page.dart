@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:file_selector/file_selector.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart'; // Import appWindow
 
@@ -14,10 +15,13 @@ import '../../services/developer_mode_service.dart';
 import '../../services/client_config_service.dart';
 import '../../services/clipboard_listener_service.dart';
 import '../../services/font_service.dart';
+import '../../services/geo_ip_service.dart';
 import '../../services/performance_monitor_service.dart';
 import '../../services/app_logger_service.dart';
 import '../../services/window_effect_service.dart';
 import '../../widgets/folder_picker_dialog.dart';
+import '../../widgets/page_transition.dart';
+import '../../widgets/scroll_edge_fade.dart';
 import '../../widgets/settings_components.dart';
 import '../../widgets/temp_files_dialog.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
@@ -122,7 +126,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // Tab state
   int _currentTabIndex = 0;
-  int _tabAnimationDirection = 1;
   final ScrollController _tabScrollController =
       createSmoothScrollController(config: SmoothScrollConfig.fast);
 
@@ -160,6 +163,9 @@ class _SettingsPageState extends State<SettingsPage> {
       TextEditingController();
   final TextEditingController _uaPackNameController = TextEditingController();
   final TextEditingController _uaPackValueController = TextEditingController();
+
+  /// 自定义离线归属地资源包下载源。空文本表示沿用内置默认源。
+  final TextEditingController _geoPackUrlController = TextEditingController();
 
   static const String _manualUaPackId = 'manual';
   static const List<_UaPack> _builtinUaPacks = [
@@ -218,6 +224,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _enableClipboardListener = true;
   bool _onlineStatsEnabled = true;
   int _browserExtensionPort = ClientConfigService.defaultBrowserExtensionPort;
+  bool _ultraLiteModeEnabled = true;
+  int _ultraLiteIdleMinutes = ClientConfigService.defaultUltraLiteIdleMinutes;
   final ValueNotifier<String> _selectedDownloadKernelId =
       ValueNotifier<String>(ClientConfigService.downloadKernelNsfx);
 
@@ -254,10 +262,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (_devModeService == null || _devModeService!.developerMode) return;
 
     if (_currentTabIndex == 6) {
-      setState(() {
-        _tabAnimationDirection = -1;
-        _currentTabIndex = 5;
-      });
+      setState(() => _currentTabIndex = 5);
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -320,6 +325,8 @@ class _SettingsPageState extends State<SettingsPage> {
       final enableClipboardListener = config.getEnableClipboardListener();
       final onlineStatsEnabled = config.getEnableOnlineStats();
       final browserExtensionPort = config.getBrowserExtensionPort();
+      final ultraLiteModeEnabled = config.getUltraLiteModeEnabled();
+      final ultraLiteIdleMinutes = config.getUltraLiteIdleMinutes();
 
       if (mounted) {
         setState(() {
@@ -332,6 +339,8 @@ class _SettingsPageState extends State<SettingsPage> {
           _enableClipboardListener = enableClipboardListener;
           _onlineStatsEnabled = onlineStatsEnabled;
           _browserExtensionPort = browserExtensionPort;
+          _ultraLiteModeEnabled = ultraLiteModeEnabled;
+          _ultraLiteIdleMinutes = ultraLiteIdleMinutes;
         });
       }
     } catch (e) {
@@ -528,6 +537,48 @@ class _SettingsPageState extends State<SettingsPage> {
           message: t.settingsSaveFailedMessage(e.toString()),
         );
       }
+    }
+  }
+
+  Future<void> _saveUltraLiteModeEnabled(bool value) async {
+    setState(() {
+      _ultraLiteModeEnabled = value;
+    });
+    try {
+      final config = Provider.of<ClientConfigService>(context, listen: false);
+      await config.setUltraLiteModeEnabled(value);
+    } catch (e) {
+      if (!mounted) return;
+      final t = AppLocalizations.of(context)!;
+      setState(() {
+        _ultraLiteModeEnabled = !value;
+      });
+      NotificationManager.of(context)?.showError(
+        t.settingsSaveFailedTitle,
+        message: t.settingsSaveFailedMessage(e.toString()),
+      );
+    }
+  }
+
+  Future<void> _saveUltraLiteIdleMinutes(int value) async {
+    final normalized = ClientConfigService.normalizeUltraLiteIdleMinutes(value);
+    final previous = _ultraLiteIdleMinutes;
+    setState(() {
+      _ultraLiteIdleMinutes = normalized;
+    });
+    try {
+      final config = Provider.of<ClientConfigService>(context, listen: false);
+      await config.setUltraLiteIdleMinutes(normalized);
+    } catch (e) {
+      if (!mounted) return;
+      final t = AppLocalizations.of(context)!;
+      setState(() {
+        _ultraLiteIdleMinutes = previous;
+      });
+      NotificationManager.of(context)?.showError(
+        t.settingsSaveFailedTitle,
+        message: t.settingsSaveFailedMessage(e.toString()),
+      );
     }
   }
 
@@ -767,6 +818,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _defaultUserAgentController.dispose();
     _uaPackNameController.dispose();
     _uaPackValueController.dispose();
+    _geoPackUrlController.dispose();
     _selectedDownloadKernelId.dispose();
     super.dispose();
   }
@@ -1621,6 +1673,11 @@ class _SettingsPageState extends State<SettingsPage> {
             'download.show_http_connectivity_badges',
             defaultValue: false,
           );
+          // 只在自定义过时回填，默认源保持输入框为空 —— 让 placeholder
+          // 「留空则使用内置默认源」如实反映当前状态。
+          final geoPackUrl = clientConfig.getString(GeoIpService.kPackUrlKey,
+              defaultValue: '');
+          _geoPackUrlController.text = geoPackUrl.trim();
 
           // Load proxy configuration
           final proxyConfig = config['proxy'] as Map<String, dynamic>?;
@@ -1727,6 +1784,12 @@ class _SettingsPageState extends State<SettingsPage> {
     await _updateConfig(proxyConfig: proxyConfig);
 
     if (mounted) {
+      // 归属地徽标缓存里的「经不经代理 / 出口在哪国」全是按旧代理测的，
+      // 代理一改就必须作废，否则关掉代理后徽标还会顶着旧的落地国显示数小时。
+      context.read<GeoIpService>().invalidateProxyDependentCache();
+    }
+
+    if (mounted) {
       NotificationManager.of(context)?.showSuccess(
         t.settingsProxySavedTitle,
         message: !_useProxy
@@ -1743,6 +1806,312 @@ class _SettingsPageState extends State<SettingsPage> {
     await clientConfig.setBool('download.show_http_connectivity_badges', value);
     if (!mounted) return;
     setState(() => _showHttpConnectivityBadges = value);
+  }
+
+  // ---------------------------------------------------------------------------
+  // IP 归属地徽标（GeoIpService）
+  // 这些设置的持久化完全由 GeoIpService 负责，页面不镜像本地状态，
+  // 统一通过 context.watch<GeoIpService>() 读取，避免与 _loadConfig 的
+  // "内核配置为 null 就整块跳过" 分支产生不一致。
+  // ---------------------------------------------------------------------------
+
+  Future<void> _setGeoBadgeEnabled(bool value) async {
+    await context.read<GeoIpService>().setEnabled(value);
+  }
+
+  Future<void> _setGeoSource(String value) async {
+    await context.read<GeoIpService>().setSource(value);
+  }
+
+  Future<void> _downloadGeoOfflinePack() async {
+    final geo = context.read<GeoIpService>();
+    if (geo.offlinePackProgress >= 0) return;
+
+    final notifications = NotificationManager.of(context);
+    final t = AppLocalizations.of(context)!;
+
+    final success = await geo.downloadOfflinePack();
+    if (!mounted) return;
+
+    if (success) {
+      notifications?.showSuccess(
+        t.settingsGeoOfflinePackTitle,
+        message: t.settingsGeoOfflinePackReady(
+          GeoIpService.formatPackSize(geo.offlinePackBytes),
+        ),
+      );
+    } else {
+      notifications?.showError(
+        t.settingsGeoOfflinePackTitle,
+        message: t.settingsGeoOfflinePackFailed(geo.lastOfflinePackError ?? ''),
+      );
+    }
+  }
+
+  Future<void> _removeGeoOfflinePack() async {
+    final geo = context.read<GeoIpService>();
+    if (geo.offlinePackProgress >= 0) return;
+
+    final notifications = NotificationManager.of(context);
+    final t = AppLocalizations.of(context)!;
+
+    await geo.removeOfflinePack();
+    if (!mounted) return;
+
+    notifications?.showInfo(
+      t.settingsGeoOfflinePackTitle,
+      message: t.settingsGeoOfflinePackMissing,
+    );
+  }
+
+  /// 从本地文件导入离线资源包。
+  ///
+  /// 内置下载源全在境外，被阻断时这是唯一不依赖网络的路径：
+  /// 用户自行下好文件后导进来。校验由 [GeoIpService.importOfflinePack]
+  /// 在后台 isolate 里完成，通过了才会覆盖已装的包。
+  Future<void> _importGeoOfflinePack() async {
+    final geo = context.read<GeoIpService>();
+    if (geo.packImportInFlight || geo.offlinePackProgress >= 0) return;
+
+    final notifications = NotificationManager.of(context);
+    final t = AppLocalizations.of(context)!;
+
+    final file = await openFile(
+      confirmButtonText: t.settingsGeoPackImportButton,
+      acceptedTypeGroups: <XTypeGroup>[
+        const XTypeGroup(
+          label: 'geolocation pack',
+          extensions: <String>['csv', 'gz', 'txt'],
+        ),
+      ],
+    );
+    if (file == null || !mounted) return;
+
+    final success = await geo.importOfflinePack(file.path);
+    if (!mounted) return;
+
+    if (success) {
+      notifications?.showSuccess(
+        t.settingsGeoPackImportTitle,
+        message: t.settingsGeoPackImportSuccess(
+          GeoIpService.formatPackSize(geo.offlinePackBytes),
+        ),
+      );
+    } else {
+      notifications?.showError(
+        t.settingsGeoPackImportTitle,
+        message: t.settingsGeoPackImportFailed(geo.lastOfflinePackError ?? ''),
+      );
+    }
+  }
+
+  /// 保存自定义资源包下载源。空串恢复内置默认源。
+  Future<void> _saveGeoPackUrl(String value) async {
+    final geo = context.read<GeoIpService>();
+    final notifications = NotificationManager.of(context);
+    final t = AppLocalizations.of(context)!;
+
+    try {
+      await geo.setOfflinePackUrl(value);
+      if (!mounted) return;
+      _geoPackUrlController.text =
+          geo.usesCustomPackUrl ? geo.offlinePackUrl : '';
+      notifications?.showSuccess(
+        t.settingsGeoPackUrlTitle,
+        message: t.settingsGeoPackUrlSaved,
+      );
+    } on FormatException {
+      if (!mounted) return;
+      notifications?.showError(
+        t.settingsGeoPackUrlTitle,
+        message: t.settingsGeoPackUrlInvalid,
+      );
+    }
+  }
+
+  /// 下载源编辑器：输入框 + 保存/恢复默认 + 两个内置源快选。
+  ///
+  /// 必须自己约束宽度：[SettingsItem] 的非紧凑分支把 trailing 直接塞进 Row 且
+  /// 不加 Expanded/Flexible，于是 trailing 是以**无界宽度**测量的。里面这个
+  /// `Expanded(TextBox)` 在无界约束下会抛 RenderFlex 异常，整行渲染成空白。
+  Widget _buildGeoPackUrlEditor(GeoIpService geo) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextBox(
+                  controller: _geoPackUrlController,
+                  placeholder: t.settingsGeoPackUrlPlaceholder,
+                  onSubmitted: _saveGeoPackUrl,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Button(
+                onPressed: () => _saveGeoPackUrl(_geoPackUrlController.text),
+                child: Text(t.settingsGeoPackUrlSave),
+              ),
+              if (geo.usesCustomPackUrl) ...[
+                const SizedBox(width: 8),
+                Button(
+                  onPressed: () => _saveGeoPackUrl(''),
+                  child: Text(t.settingsGeoPackUrlReset),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                t.settingsGeoPackPresetLabel,
+                style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+              ),
+              HyperlinkButton(
+                onPressed: () =>
+                    _saveGeoPackUrl(GeoIpService.defaultOfflinePackUrl),
+                child: Text(t.settingsGeoPackPresetJsdelivr),
+              ),
+              HyperlinkButton(
+                onPressed: () =>
+                    _saveGeoPackUrl(GeoIpService.unpkgOfflinePackUrl),
+                child: Text(t.settingsGeoPackPresetUnpkg),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 离线资源包行的尾部控件：下载中显示进度，否则显示下载 / 删除按钮。
+  Widget _buildGeoOfflinePackTrailing(GeoIpService geo) {
+    if (geo.offlinePackProgress >= 0) {
+      final rawPercent = (geo.offlinePackProgress * 100).round();
+      final int percent = rawPercent < 0
+          ? 0
+          : rawPercent > 100
+              ? 100
+              : rawPercent;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: ProgressRing(strokeWidth: 2),
+          ),
+          const SizedBox(width: 8),
+          Text(t.settingsGeoOfflinePackDownloading(percent)),
+        ],
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Button(
+          onPressed: _downloadGeoOfflinePack,
+          child: Text(t.settingsGeoOfflinePackDownload),
+        ),
+        if (geo.offlinePackInstalled) ...[
+          const SizedBox(width: 8),
+          Button(
+            onPressed: _removeGeoOfflinePack,
+            child: Text(t.settingsGeoOfflinePackRemove),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// 出口国精度限制的常驻说明。
+  ///
+  /// 这条**不随状态变化**，因为它说的是一个原理性限制而不是当前故障：
+  /// 规则型代理客户端（Clash / mihomo / sing-box）把分流规则放在自己内部，
+  /// 应用只看得到本地监听地址，无从得知某个目标命中了哪条规则。
+  ///
+  /// 要精确只能去读客户端自己的 API（如 Clash 的 external-controller
+  /// `/connections`），那需要用户开启接口并配置密钥，且各客户端互不兼容，
+  /// 已决定暂不实现——所以这里必须把限制讲清楚，而不是让用户以为出口国是实测值。
+  Widget _buildGeoAccuracyNotice() {
+    return SizedBox(
+      width: double.infinity,
+      child: InfoBar(
+        title: Text(t.settingsGeoAccuracyNoticeTitle),
+        content: Text(t.settingsGeoAccuracyNotice),
+        severity: InfoBarSeverity.info,
+        isLong: true,
+      ),
+    );
+  }
+
+  /// 归属地数据源的状态提示条。
+  /// 优先级：下载失败 > 已选离线但未安装资源包 > 离线数据来源说明 > 在线隐私提示。
+  Widget _buildGeoStatusInfoBar(GeoIpService geo) {
+    final isOffline = geo.source == GeoIpService.sourceOffline;
+    final packError = geo.lastOfflinePackError;
+    final downloading = geo.offlinePackProgress >= 0;
+
+    if (isOffline && packError != null && packError.isNotEmpty) {
+      return SizedBox(
+        width: double.infinity,
+        child: InfoBar(
+          title: Text(t.settingsGeoOfflinePackTitle),
+          content: Text(t.settingsGeoOfflinePackFailed(packError)),
+          action: downloading
+              ? null
+              : Button(
+                  onPressed: _downloadGeoOfflinePack,
+                  child: Text(t.settingsGeoOfflinePackDownload),
+                ),
+          severity: InfoBarSeverity.error,
+          isLong: true,
+        ),
+      );
+    }
+
+    // 选择了离线库却没有资源包：明确提示用户先下载，并直接给出下载入口。
+    if (isOffline && !geo.offlinePackInstalled) {
+      return SizedBox(
+        width: double.infinity,
+        child: InfoBar(
+          title: Text(t.settingsGeoOfflinePackTitle),
+          content: Text(t.settingsGeoOfflinePackMissing),
+          action: downloading
+              ? null
+              : Button(
+                  onPressed: _downloadGeoOfflinePack,
+                  child: Text(t.settingsGeoOfflinePackDownload),
+                ),
+          severity: InfoBarSeverity.warning,
+          isLong: true,
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      child: InfoBar(
+        title: Text(
+          isOffline ? t.settingsGeoOfflinePackTitle : t.settingsGeoSourceTitle,
+        ),
+        content: Text(
+          isOffline
+              ? t.settingsGeoOfflinePackSourceNote
+              : t.settingsGeoPrivacyNotice,
+        ),
+        severity: InfoBarSeverity.info,
+        isLong: true,
+      ),
+    );
   }
 
   Future<void> _saveDefaultUserAgent() async {
@@ -1823,29 +2192,35 @@ class _SettingsPageState extends State<SettingsPage> {
           final useSideNavigation = constraints.maxWidth >= 900;
           if (useSideNavigation) {
             return Padding(
-              padding: const EdgeInsets.fromLTRB(22, 4, 22, 0),
+              // 与 PageHeader 的 24px 起始缩进对齐，保证左导航与标题同一基准线
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
                     width: 232,
-                    child: SmoothSingleChildScrollView(
-                      config: SmoothScrollConfig.fast,
-                      child: _buildSidebarNavigation(context, tabItems),
+                    child: ScrollEdgeFade(
+                      topExtent: 20,
+                      child: SmoothSingleChildScrollView(
+                        config: SmoothScrollConfig.fast,
+                        child: _buildSidebarNavigation(context, tabItems),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 22),
                   Expanded(
-                    child: SmoothSingleChildScrollView(
-                      config: SmoothScrollConfig.fast,
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 920),
-                          child: _buildAnimatedSettingsContent(
-                            context,
-                            isDeveloperMode,
+                    child: ScrollEdgeFade(
+                      child: SmoothSingleChildScrollView(
+                        config: SmoothScrollConfig.fast,
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 920),
+                            child: _buildAnimatedSettingsContent(
+                              context,
+                              isDeveloperMode,
+                            ),
                           ),
                         ),
                       ),
@@ -1856,21 +2231,23 @@ class _SettingsPageState extends State<SettingsPage> {
             );
           }
 
-          return SmoothSingleChildScrollView(
-            config: SmoothScrollConfig.fast,
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildCompactNavigation(
-                  context,
-                  tabItems,
-                  fontFamily: fontStack.primaryFamily,
-                  fontFamilyFallback: fontStack.fallbackFamilies,
-                ),
-                const SizedBox(height: 16),
-                _buildAnimatedSettingsContent(context, isDeveloperMode),
-              ],
+          return ScrollEdgeFade(
+            child: SmoothSingleChildScrollView(
+              config: SmoothScrollConfig.fast,
+              padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildCompactNavigation(
+                    context,
+                    tabItems,
+                    fontFamily: fontStack.primaryFamily,
+                    fontFamilyFallback: fontStack.fallbackFamilies,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildAnimatedSettingsContent(context, isDeveloperMode),
+                ],
+              ),
             ),
           );
         },
@@ -1960,10 +2337,11 @@ class _SettingsPageState extends State<SettingsPage> {
   ) {
     return ClipRect(
       child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 240),
-        reverseDuration: const Duration(milliseconds: 180),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
+        duration: WinUiEntranceMotion.duration,
+        // 旧页直接淡出，不做位移，避免两页同时滑动打架
+        reverseDuration: const Duration(milliseconds: 120),
+        switchInCurve: Curves.linear,
+        switchOutCurve: Curves.easeIn,
         transitionBuilder: _buildTabContentTransition,
         layoutBuilder: (currentChild, previousChildren) {
           return Stack(
@@ -1974,7 +2352,12 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           );
         },
+        // key 必须挂在 AnimatedSwitcher 的直接子节点上。
+        // 之前 key 挂在 SettingsTabScope 内部的 Column 上，外层 SettingsTabScope
+        // 没有 key，Widget.canUpdate 判定为"同一个 widget"，AnimatedSwitcher
+        // 就地替换内容 —— 切 tab 根本不会触发任何过渡。
         child: SettingsTabScope(
+          key: ValueKey<int>(_currentTabIndex),
           tabIndex: _currentTabIndex,
           child: _buildCurrentTabContent(context, isDeveloperMode),
         ),
@@ -1986,25 +2369,16 @@ class _SettingsPageState extends State<SettingsPage> {
     BuildContext context,
     List<_SettingsTabInfo> items,
   ) {
+    // WinUI 3 NavigationView 风格：单行紧凑导航项 + 左侧 accent pill 指示器
+    // 不加横向内边距：导航项底色/指示器左缘直接落在页面 24px 基准线上
     return Container(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-            child: Text(
-              _isChineseLocale ? '设置分类' : 'Settings',
-              style: FluentTheme.of(context).typography.caption?.copyWith(
-                    color: AppTheme.textTertiary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ),
           for (final item in items) ...[
             _buildSidebarNavigationItem(context, item),
-            if (item != items.last) const SizedBox(height: 3),
+            if (item != items.last) const SizedBox(height: 2),
           ],
         ],
       ),
@@ -2017,97 +2391,101 @@ class _SettingsPageState extends State<SettingsPage> {
   ) {
     final isDark = AppTheme.isDarkContext(context);
     final selected = _currentTabIndex == item.index;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () => _selectTab(item.index),
-        child: TweenAnimationBuilder<double>(
-          tween: Tween<double>(end: selected ? 1 : 0),
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          builder: (context, selectedValue, child) {
-            final background = Color.lerp(
-              Colors.transparent,
-              AppTheme.accentPrimary.withValues(alpha: isDark ? 0.14 : 0.10),
-              selectedValue,
-            )!;
-            final iconColor = Color.lerp(
-              AppTheme.textSecondary,
-              AppTheme.accentLight,
-              selectedValue,
-            )!;
+    final pillColor = isDark ? AppTheme.accentLight : AppTheme.accentPrimary;
 
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
-              decoration: BoxDecoration(
-                color: background,
-                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 3,
-                    height: 34,
-                    child: Center(
-                      child: SizedBox(
-                        width: 3,
-                        height: 18 + (16 * selectedValue),
-                        child: DecoratedBox(
+    return Tooltip(
+      message: item.description,
+      useMousePosition: false,
+      style: const TooltipThemeData(
+        waitDuration: Duration(milliseconds: 600),
+      ),
+      child: HoverButton(
+        onPressed: () => _selectTab(item.index),
+        cursor: SystemMouseCursors.click,
+        builder: (context, states) {
+          return TweenAnimationBuilder<double>(
+            tween: Tween<double>(end: selected ? 1 : 0),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            builder: (context, selectedValue, child) {
+              final hoverValue = states.isHovered ? 1.0 : 0.0;
+              final background = AppTheme.shellNavItemBackground(
+                hoverValue: hoverValue,
+                selectedValue: selectedValue,
+              );
+              final iconColor = Color.lerp(
+                AppTheme.textSecondary,
+                pillColor,
+                selectedValue,
+              )!;
+              final textColor = Color.lerp(
+                AppTheme.textSecondary,
+                AppTheme.textPrimary,
+                (selectedValue + hoverValue * (1 - selectedValue))
+                    .clamp(0.0, 1.0),
+              )!;
+
+              return Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  color: background,
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                ),
+                child: Stack(
+                  // Stack 默认 topStart + 松约束会让图标/文字缩到自身高度并顶到
+                  // 顶部，而指示器是按 36px 居中定位的，两者会差约 9px。
+                  // expand 让内容撑满整高，由 Row 的默认交叉轴居中对齐。
+                  fit: StackFit.expand,
+                  children: [
+                    // WinUI 3 选中指示器（pill）
+                    Positioned(
+                      left: 0,
+                      top: (36 - 16 * selectedValue) / 2,
+                      child: Opacity(
+                        opacity: selectedValue,
+                        child: Container(
+                          width: 3,
+                          height: 16 * selectedValue,
                           decoration: BoxDecoration(
-                            color: Color.lerp(
-                              Colors.transparent,
-                              AppTheme.accentLight,
-                              selectedValue,
-                            ),
-                            borderRadius: BorderRadius.circular(3),
+                            color: pillColor,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 9),
-                  Icon(item.icon, size: 15, color: iconColor),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              FluentTheme.of(context).typography.body?.copyWith(
-                                    color: selected
-                                        ? AppTheme.textPrimary
-                                        : AppTheme.textSecondary,
-                                    fontWeight: FontWeight.w600,
+                    Padding(
+                      // 16 + 图标 16 + 间距 12 = 44，使标题与页头 "设置" 文本左缘一致
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          Icon(item.icon, size: 16, color: iconColor),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: FluentTheme.of(context)
+                                  .typography
+                                  .body
+                                  ?.copyWith(
+                                    color: textColor,
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
                                     fontSize: 13,
                                   ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          item.description,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: FluentTheme.of(context)
-                              .typography
-                              .caption
-                              ?.copyWith(
-                                color: AppTheme.textTertiary,
-                                fontSize: 11,
-                              ),
-                        ),
-                      ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -2118,13 +2496,9 @@ class _SettingsPageState extends State<SettingsPage> {
     required String? fontFamily,
     required List<String> fontFamilyFallback,
   }) {
+    // WinUI 3 顶部导航：无卡片容器，透明背景
     return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppTheme.surfaceCard,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.borderDefault),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final tabTextStyle =
@@ -2234,10 +2608,7 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    setState(() {
-      _tabAnimationDirection = index > _currentTabIndex ? 1 : -1;
-      _currentTabIndex = index;
-    });
+    setState(() => _currentTabIndex = index);
   }
 
   Widget _buildCurrentTabContent(BuildContext context, bool isDeveloperMode) {
@@ -2258,6 +2629,8 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// Windows 11 NavigationView 同款：新页面从下方 28px 上移 + 淡入；
+  /// 旧页面只淡出，不参与位移。
   Widget _buildTabContentTransition(
     Widget child,
     Animation<double> animation,
@@ -2265,25 +2638,11 @@ class _SettingsPageState extends State<SettingsPage> {
     final childKey = child.key;
     final isIncoming =
         childKey is ValueKey<int> && childKey.value == _currentTabIndex;
-    final direction = _tabAnimationDirection.toDouble();
-    final beginOffset = isIncoming
-        ? Offset(0.035 * direction, 0)
-        : Offset(-0.025 * direction, 0);
-    final curvedAnimation = CurvedAnimation(
-      parent: animation,
-      curve: isIncoming ? Curves.easeOutCubic : Curves.easeInCubic,
-    );
 
-    return FadeTransition(
-      opacity: curvedAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: beginOffset,
-          end: Offset.zero,
-        ).animate(curvedAnimation),
-        child: child,
-      ),
-    );
+    if (!isIncoming) {
+      return FadeTransition(opacity: animation, child: child);
+    }
+    return WinUiEntranceMotion.build(animation, child);
   }
 
   Widget _buildTabButton(
@@ -2296,80 +2655,118 @@ class _SettingsPageState extends State<SettingsPage> {
     required List<String> fontFamilyFallback,
   }) {
     final isSelected = _currentTabIndex == index;
+    final isDark = AppTheme.isDarkContext(context);
+    final pillColor = isDark ? AppTheme.accentLight : AppTheme.accentPrimary;
 
+    // WinUI 3 顶部导航项：透明背景 + hover subtle + 底部 accent 指示条
     return SizedBox(
       width: width,
-      child: MouseRegion(
+      child: HoverButton(
+        onPressed: () => _selectTab(index),
         cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: () => _selectTab(index),
-          child: TweenAnimationBuilder<double>(
+        builder: (context, states) {
+          return TweenAnimationBuilder<double>(
             tween: Tween<double>(end: isSelected ? 1 : 0),
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             builder: (context, selectedValue, child) {
-              final contentColor = Color.lerp(
+              final hoverValue = states.isHovered ? 1.0 : 0.0;
+              final iconColor = Color.lerp(
                 AppTheme.textSecondary,
-                AppTheme.accentLight,
+                pillColor,
                 selectedValue,
+              )!;
+              final textColor = Color.lerp(
+                AppTheme.textSecondary,
+                AppTheme.textPrimary,
+                (selectedValue + hoverValue * (1 - selectedValue))
+                    .clamp(0.0, 1.0),
               )!;
               final backgroundColor = Color.lerp(
                 Colors.transparent,
-                AppTheme.accentPrimary.withValues(alpha: 0.15),
-                selectedValue,
-              )!;
-              final borderColor = Color.lerp(
-                Colors.transparent,
-                AppTheme.accentPrimary.withValues(alpha: 0.4),
-                selectedValue,
+                AppTheme.surfaceCardHover,
+                hoverValue,
               )!;
 
               return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 8,
-                ),
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
                   color: backgroundColor,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                  border: Border.all(
-                    color: borderColor,
-                    width: 1.5,
-                  ),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                 ),
-                child: Row(
-                  mainAxisSize:
-                      width == null ? MainAxisSize.min : MainAxisSize.max,
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Stack(
+                  alignment: Alignment.center,
                   children: [
-                    Icon(
-                      icon,
-                      size: 14,
-                      color: contentColor,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      title,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.fade,
-                      style: FluentTheme.of(context).typography.body?.copyWith(
-                            fontFamily: fontFamily,
-                            fontFamilyFallback: fontFamilyFallback,
-                            color: contentColor,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
+                    Row(
+                      mainAxisSize:
+                          width == null ? MainAxisSize.min : MainAxisSize.max,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          icon,
+                          size: 14,
+                          color: iconColor,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.fade,
+                            style: FluentTheme.of(context)
+                                .typography
+                                .body
+                                ?.copyWith(
+                                  fontFamily: fontFamily,
+                                  fontFamilyFallback: fontFamilyFallback,
+                                  color: textColor,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  fontSize: 13,
+                                ),
                           ),
+                        ),
+                      ],
+                    ),
+                    // 底部指示条（WinUI top NavigationView selection indicator）
+                    Positioned(
+                      bottom: 0,
+                      child: Container(
+                        width: 16 * selectedValue,
+                        height: 3,
+                        decoration: BoxDecoration(
+                          color: pillColor.withValues(alpha: selectedValue),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               );
             },
-          ),
-        ),
+          );
+        },
       ),
     );
   }
+
+  static const List<int> _ultraLiteIdleMinuteOptions = [
+    1,
+    3,
+    5,
+    10,
+    20,
+    30,
+    60
+  ];
+
+  /// 保证当前值一定在下拉项里，否则 ComboBox 会因为找不到选中项而断言失败。
+  List<int> get _ultraLiteIdleMinuteItems =>
+      <int>{..._ultraLiteIdleMinuteOptions, _ultraLiteIdleMinutes}.toList()
+        ..sort();
 
   List<Widget> _buildGeneralTab(BuildContext context) {
     final t = AppLocalizations.of(context)!;
@@ -2420,6 +2817,48 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: (value) {
                 if (value != null) _saveCloseButtonBehavior(value);
               },
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      _buildSection(
+        context,
+        searchId: 'settingsSectionBackgroundPower',
+        title: t.settingsSectionBackgroundPower,
+        icon: custom_icons.FluentIcons.speed_high,
+        children: [
+          _buildSettingItem(
+            context,
+            searchId: 'settingsUltraLiteMode',
+            title: t.settingsUltraLiteTitle,
+            subtitle: t.settingsUltraLiteSubtitle,
+            trailing: ToggleSwitch(
+              checked: _ultraLiteModeEnabled,
+              onChanged: _saveUltraLiteModeEnabled,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingItem(
+            context,
+            searchId: 'settingsUltraLiteIdle',
+            title: t.settingsUltraLiteIdleTitle,
+            subtitle: t.settingsUltraLiteIdleSubtitle,
+            trailing: ComboBox<int>(
+              value: _ultraLiteIdleMinutes,
+              items: _ultraLiteIdleMinuteItems
+                  .map(
+                    (minutes) => ComboBoxItem<int>(
+                      value: minutes,
+                      child: Text(t.settingsUltraLiteIdleMinutesLabel(minutes)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _ultraLiteModeEnabled
+                  ? (value) {
+                      if (value != null) _saveUltraLiteIdleMinutes(value);
+                    }
+                  : null,
             ),
           ),
         ],
@@ -3617,6 +4056,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   List<Widget> _buildAdvancedTab(BuildContext context) {
+    final geo = context.watch<GeoIpService>();
     return [
       _buildStatusSection(context),
       const SizedBox(height: 24),
@@ -3646,6 +4086,105 @@ class _SettingsPageState extends State<SettingsPage> {
               onChanged: _setShowHttpConnectivityBadges,
             ),
           ),
+          const SizedBox(height: 12),
+          _buildSettingItem(
+            context,
+            searchId: 'settingsGeoBadge',
+            title: t.settingsGeoBadgeTitle,
+            subtitle: t.settingsGeoBadgeSubtitle,
+            trailing: ToggleSwitch(
+              checked: geo.enabled,
+              onChanged: _setGeoBadgeEnabled,
+            ),
+          ),
+          if (geo.enabled) ...[
+            const SizedBox(height: 12),
+            _buildSettingItem(
+              context,
+              searchId: 'settingsGeoSource',
+              title: t.settingsGeoSourceTitle,
+              subtitle: t.settingsGeoSourceSubtitle,
+              trailing: ComboBox<String>(
+                value: geo.source,
+                items: [
+                  ComboBoxItem<String>(
+                    value: GeoIpService.sourceOnline,
+                    child: Text(t.settingsGeoSourceOnline),
+                  ),
+                  ComboBoxItem<String>(
+                    value: GeoIpService.sourceOffline,
+                    child: Text(t.settingsGeoSourceOffline),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value == null || value == geo.source) return;
+                  _setGeoSource(value);
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 资源包只在选择离线库时可操作：在线模式下无需下载。
+            _buildDisabledSetting(
+              enabled: geo.source == GeoIpService.sourceOffline,
+              child: _buildSettingItem(
+                context,
+                searchId: 'settingsGeoOfflinePack',
+                title: t.settingsGeoOfflinePackTitle,
+                subtitle: geo.offlinePackInstalled
+                    ? t.settingsGeoOfflinePackReady(
+                        GeoIpService.formatPackSize(geo.offlinePackBytes),
+                      )
+                    : t.settingsGeoOfflinePackMissing,
+                trailing: _buildGeoOfflinePackTrailing(geo),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 自定义下载源：内置的 jsDelivr / unpkg 都在境外，被墙时这是第一条退路。
+            _buildDisabledSetting(
+              enabled: geo.source == GeoIpService.sourceOffline,
+              // 用 Ua 版布局：它在窄窗口下把 trailing 换行到下方左对齐，
+              // 输入框 + 按钮这种宽内容用普通版会被挤扁。
+              child: _buildUaSettingItem(
+                context,
+                searchId: 'settingsGeoPackUrl',
+                title: t.settingsGeoPackUrlTitle,
+                subtitle: t.settingsGeoPackUrlSubtitle,
+                trailing: _buildGeoPackUrlEditor(geo),
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 本地导入：下载源全被阻断时的最后退路，完全不依赖网络。
+            _buildDisabledSetting(
+              enabled: geo.source == GeoIpService.sourceOffline,
+              child: _buildSettingItem(
+                context,
+                searchId: 'settingsGeoPackImport',
+                title: t.settingsGeoPackImportTitle,
+                subtitle: t.settingsGeoPackImportSubtitle,
+                trailing: geo.packImportInFlight
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: ProgressRing(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(t.settingsGeoPackImportValidating),
+                        ],
+                      )
+                    : Button(
+                        onPressed: _importGeoOfflinePack,
+                        child: Text(t.settingsGeoPackImportButton),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildGeoStatusInfoBar(geo),
+            const SizedBox(height: 12),
+            _buildGeoAccuracyNotice(),
+          ],
         ],
       ),
       const SizedBox(height: 24),
@@ -3763,9 +4302,7 @@ class _SettingsPageState extends State<SettingsPage> {
               option(
                 ClientConfigService.downloadKernelNsfx,
                 'NSFX',
-                _isChineseLocale
-                    ? '始终使用稳定内核'
-                    : 'Always use the stable engine',
+                _isChineseLocale ? '始终使用稳定内核' : 'Always use the stable engine',
               ),
               option(
                 ClientConfigService.downloadKernelNeoNsf,
@@ -4021,7 +4558,7 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('Auto'),
             content: Text(
               _isChineseLocale
-                  ? 'Auto \u4f1a\u5728 NeoNSFX \u63a5\u7ba1\u524d\u4fdd\u7559 NSFX \u56de\u9000\uff1b\u5df2\u5efa\u7acb\u7684\u4efb\u52a1\u59cb\u7ec8\u7531\u539f\u5185\u6838\u7ee7\u7eed\u7ba1\u7406\u3002'
+                  ? 'Auto \u4f1a\u5728 NeoNSF \u63a5\u7ba1\u524d\u4fdd\u7559 NSFX \u56de\u9000\uff1b\u5df2\u5efa\u7acb\u7684\u4efb\u52a1\u59cb\u7ec8\u7531\u539f\u5185\u6838\u7ee7\u7eed\u7ba1\u7406\u3002'
                   : 'Auto keeps NSFX as a pre-acceptance fallback; existing tasks always stay with their original engine.',
             ),
             severity: InfoBarSeverity.info,

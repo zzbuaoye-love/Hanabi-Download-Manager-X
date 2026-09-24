@@ -349,6 +349,15 @@ class FluentIcons {
   static IconData get globe_shield_24 => getIcon('globe_shield_24');
   static IconData get network_tower => globe_shield_24;
 
+  // 归属地徽标的方向字形。名字写错时 getIcon 只会静默回落到占位字形，
+  // 所以统一收敛到这里，让调用方拿到编译期检查。
+  static IconData get arrow_right_16 => getIcon('arrow_right_16');
+  static IconData get arrow_down_12 => getIcon('arrow_down_12');
+  static IconData get arrow_up_12 => getIcon('arrow_up_12');
+  static IconData get arrow_left_12 => getIcon('arrow_left_12');
+  static IconData get arrow_right_12 => getIcon('arrow_right_12');
+  static IconData get desktop_16 => getIcon('desktop_16');
+
   static IconData get record_20 => getIcon('record_20');
   static IconData get record_24 => getIcon('record_24');
   static IconData get status_circle_inner => record_24;

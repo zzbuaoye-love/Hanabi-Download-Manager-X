@@ -28,11 +28,27 @@ Widget _buildTestApp(Widget child) {
   );
 }
 
+Future<void> _settleFileSystem(WidgetTester tester) async {
+  // Widget tests run with a fake clock; let real Windows directory I/O finish
+  // before pumping each state change it schedules. Initialization has several
+  // chained I/O awaits, so one runAsync window is not sufficient.
+  for (var attempt = 0; attempt < 20; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
+    );
+    await tester.pump();
+    if (find.byType(ProgressRing).evaluate().isEmpty) {
+      return;
+    }
+  }
+  fail('Folder picker did not finish loading the test directory');
+}
+
 void main() {
   testWidgets('file mode filters files and remains single-select by default',
       (tester) async {
-    final temporary = await Directory.systemTemp.createTemp('hanabi-picker-');
-    addTearDown(() => temporary.delete(recursive: true));
+    final temporary = Directory.systemTemp.createTempSync('hanabi-picker-');
+    addTearDown(() => temporary.deleteSync(recursive: true));
     final zipFile =
         File('${temporary.path}${Platform.pathSeparator}plugin.zip');
     final packageFile = File(
@@ -40,11 +56,10 @@ void main() {
     );
     final ignoredFile =
         File('${temporary.path}${Platform.pathSeparator}notes.txt');
-    await zipFile.writeAsString('zip');
-    await packageFile.writeAsString('package');
-    await ignoredFile.writeAsString('ignored');
-    await Directory('${temporary.path}${Platform.pathSeparator}nested')
-        .create();
+    zipFile.writeAsStringSync('zip');
+    packageFile.writeAsStringSync('package');
+    ignoredFile.writeAsStringSync('ignored');
+    Directory('${temporary.path}${Platform.pathSeparator}nested').createSync();
 
     await tester.binding.setSurfaceSize(const Size(960, 760));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -60,7 +75,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
+    await _settleFileSystem(tester);
 
     expect(find.text('plugin.zip'), findsOneWidget);
     expect(find.text('plugin.hanabi-plugin'), findsOneWidget);
@@ -75,13 +90,13 @@ void main() {
     expect(tester.widget<FilledButton>(selectButton).onPressed, isNull);
 
     await tester.tap(find.text('plugin.zip'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(tester.widget<FilledButton>(selectButton).onPressed, isNotNull);
     expect(find.text(zipFile.absolute.path), findsOneWidget);
 
     await tester.tap(find.text('plugin.hanabi-plugin'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text(packageFile.absolute.path), findsOneWidget);
     expect(find.text(zipFile.absolute.path), findsNothing);
@@ -90,13 +105,13 @@ void main() {
 
   testWidgets('allowMultiple selects and deselects several visible files',
       (tester) async {
-    final temporary = await Directory.systemTemp.createTemp('hanabi-multi-');
-    addTearDown(() => temporary.delete(recursive: true));
-    await File('${temporary.path}${Platform.pathSeparator}first.zip')
-        .writeAsString('first');
-    await File(
+    final temporary = Directory.systemTemp.createTempSync('hanabi-multi-');
+    addTearDown(() => temporary.deleteSync(recursive: true));
+    File('${temporary.path}${Platform.pathSeparator}first.zip')
+        .writeAsStringSync('first');
+    File(
       '${temporary.path}${Platform.pathSeparator}second.hanabi-plugin',
-    ).writeAsString('second');
+    ).writeAsStringSync('second');
 
     await tester.binding.setSurfaceSize(const Size(960, 760));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -112,7 +127,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
+    await _settleFileSystem(tester);
 
     expect(find.byType(Checkbox), findsNWidgets(2));
     final selectButton = find.widgetWithText(FilledButton, '使用所选文件 (0)');
@@ -135,12 +150,11 @@ void main() {
   });
 
   testWidgets('directory mode remains backward compatible', (tester) async {
-    final temporary = await Directory.systemTemp.createTemp('hanabi-folder-');
-    addTearDown(() => temporary.delete(recursive: true));
-    await File('${temporary.path}${Platform.pathSeparator}hidden.zip')
-        .writeAsString('zip');
-    await Directory('${temporary.path}${Platform.pathSeparator}visible')
-        .create();
+    final temporary = Directory.systemTemp.createTempSync('hanabi-folder-');
+    addTearDown(() => temporary.deleteSync(recursive: true));
+    File('${temporary.path}${Platform.pathSeparator}hidden.zip')
+        .writeAsStringSync('zip');
+    Directory('${temporary.path}${Platform.pathSeparator}visible').createSync();
 
     await tester.binding.setSurfaceSize(const Size(960, 760));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -148,7 +162,7 @@ void main() {
       _buildTestApp(FolderPickerDialog(initialPath: temporary.path)),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
+    await _settleFileSystem(tester);
 
     expect(find.text('visible'), findsOneWidget);
     expect(find.text('hidden.zip'), findsNothing);
@@ -165,10 +179,9 @@ void main() {
 
   testWidgets('compact layout collapses the navigation rail without overflow',
       (tester) async {
-    final temporary = await Directory.systemTemp.createTemp('hanabi-compact-');
-    addTearDown(() => temporary.delete(recursive: true));
-    await Directory('${temporary.path}${Platform.pathSeparator}visible')
-        .create();
+    final temporary = Directory.systemTemp.createTempSync('hanabi-compact-');
+    addTearDown(() => temporary.deleteSync(recursive: true));
+    Directory('${temporary.path}${Platform.pathSeparator}visible').createSync();
 
     await tester.binding.setSurfaceSize(const Size(640, 560));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -176,7 +189,7 @@ void main() {
       _buildTestApp(FolderPickerDialog(initialPath: temporary.path)),
     );
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 200));
+    await _settleFileSystem(tester);
 
     expect(find.text('visible'), findsOneWidget);
     expect(find.text('快速访问'), findsNothing);

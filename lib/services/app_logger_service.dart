@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -58,6 +59,18 @@ class LogEntry {
 class AppLoggerService extends ChangeNotifier {
   static final AppLoggerService _instance = AppLoggerService._internal();
   static const bool _isFlutterTest = bool.fromEnvironment('FLUTTER_TEST');
+
+  static bool get _hasServicesBinding {
+    try {
+      ServicesBinding.instance;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool get _usesEphemeralStorage =>
+      _isFlutterTest || !_hasServicesBinding;
   Duration _logRetention = const Duration(days: 14);
   static const int _maxSessionLogFiles = 40;
 
@@ -146,7 +159,7 @@ class AppLoggerService extends ChangeNotifier {
     if (_initialized) {
       return;
     }
-    if (_isFlutterTest) {
+    if (_usesEphemeralStorage) {
       _initialized = true;
       return;
     }
@@ -161,7 +174,7 @@ class AppLoggerService extends ChangeNotifier {
   }
 
   Future<Directory> getLogDirectory() async {
-    if (_isFlutterTest) {
+    if (_usesEphemeralStorage) {
       return Directory(Directory.systemTemp.path);
     }
 
@@ -183,7 +196,7 @@ class AppLoggerService extends ChangeNotifier {
   }
 
   Future<File> _createFullLogFile() async {
-    if (_isFlutterTest) {
+    if (_usesEphemeralStorage) {
       final stamp = _sessionFileStamp ??= _buildSessionFileStamp();
       return File('${Directory.systemTemp.path}/hanabi_runtime_$stamp.log');
     }
@@ -273,7 +286,7 @@ class AppLoggerService extends ChangeNotifier {
   }
 
   Future<void> _cleanupOldLogs() async {
-    if (_isFlutterTest) {
+    if (_usesEphemeralStorage) {
       return;
     }
 
@@ -357,7 +370,7 @@ class AppLoggerService extends ChangeNotifier {
     _sessionFileStamp = null;
     _hasPersistedEntry = false;
 
-    if (_isFlutterTest) {
+    if (_usesEphemeralStorage) {
       return;
     }
 
@@ -410,7 +423,7 @@ class AppLoggerService extends ChangeNotifier {
     }
     _version++;
 
-    if (!_isFlutterTest && persist && _persistenceEnabled) {
+    if (!_usesEphemeralStorage && persist && _persistenceEnabled) {
       _fullLogBuffer.writeln(entry.format(fullTimestamp: true));
       final shouldFlushImmediately = immediateFlush || !_hasPersistedEntry;
       _hasPersistedEntry = true;

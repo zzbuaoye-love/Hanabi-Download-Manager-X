@@ -101,6 +101,11 @@ class FlutterWindow : public Win32Window {
   bool rounded_corners_enabled_ = true;
   int corner_radius_ = 6;
   int tray_menu_region_radius_ = 14;
+
+  // Last logical size requested via resizeWindow; reapplied whenever the
+  // window changes monitors (and therefore DPI) before being shown.
+  int tray_menu_logical_width_ = 0;
+  int tray_menu_logical_height_ = 0;
   std::vector<TrayMenuRegionRect> tray_menu_region_rects_;
   bool drag_suspend_ = true;
   bool launch_hidden_ = false;

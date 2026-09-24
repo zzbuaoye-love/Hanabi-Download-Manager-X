@@ -7,16 +7,20 @@ import '../../services/integrated_download_service.dart';
 import '../../services/performance_monitor_service.dart';
 import '../../services/download_failure_stats_service.dart';
 import '../../services/client_config_service.dart';
+import '../../services/geo_ip_service.dart';
 import '../../models/download_task.dart'
     show DownloadTask, DownloadStatus, SegmentInfo;
 import '../../theme/app_theme.dart';
 import '../../widgets/file_icon_widget.dart';
 import '../../widgets/animated_card.dart';
+import '../../widgets/fluent_interactions.dart';
+import '../../widgets/scroll_edge_fade.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
 import '../../utils/fluent_icons.dart' as CustomIcons;
 import '../../utils/failure_reason_localizer.dart';
 import '../../widgets/animated_notifications.dart';
 import '../../widgets/speed_chart_widget.dart';
+import '../../widgets/geo_route_badge.dart';
 import '../../l10n/app_localizations.dart';
 
 class DownloadList extends StatefulWidget {
@@ -183,44 +187,48 @@ class _DownloadListState extends State<DownloadList> {
               ),
               // 任务列表
               Expanded(
-                child: SmoothListView.builder(
-                  padding: const EdgeInsets.all(20),
-                  itemCount: activeTasks.length,
-                  // 性能优化：增加缓存区域，预加载更多项目减少滚动时的创建销毁
-                  cacheExtent: 500,
-                  // 添加 addRepaintBoundaries 优化重绘
-                  addRepaintBoundaries: true,
-                  // 添加 addAutomaticKeepAlives 保持状态
-                  addAutomaticKeepAlives: false,
-                  // 平滑滚动配置 - 使用快速响应模式
-                  config: SmoothScrollConfig.fast,
-                  itemBuilder: (context, index) {
-                    final taskId = activeTasks[index].id;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      // 使用 RepaintBoundary 隔离每个卡片的重绘
-                      child: RepaintBoundary(
-                        child:
-                            Selector<IntegratedDownloadService, DownloadTask?>(
-                          key: ValueKey(taskId),
-                          selector: (_, service) {
-                            try {
-                              return service.tasks
-                                  .firstWhere((t) => t.id == taskId);
-                            } catch (_) {
-                              return null;
-                            }
-                          },
-                          builder: (context, task, child) {
-                            if (task == null) return const SizedBox.shrink();
-                            return _DownloadTaskCard(
-                              task: task,
-                            );
-                          },
+                child: ScrollEdgeFade(
+                  topExtent: 20,
+                  bottomExtent: 20,
+                  child: SmoothListView.builder(
+                    padding: const EdgeInsets.all(20),
+                    itemCount: activeTasks.length,
+                    // 性能优化：增加缓存区域，预加载更多项目减少滚动时的创建销毁
+                    cacheExtent: 500,
+                    // 添加 addRepaintBoundaries 优化重绘
+                    addRepaintBoundaries: true,
+                    // 添加 addAutomaticKeepAlives 保持状态
+                    addAutomaticKeepAlives: false,
+                    // 平滑滚动配置 - 使用快速响应模式
+                    config: SmoothScrollConfig.fast,
+                    itemBuilder: (context, index) {
+                      final taskId = activeTasks[index].id;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        // 使用 RepaintBoundary 隔离每个卡片的重绘
+                        child: RepaintBoundary(
+                          child: Selector<IntegratedDownloadService,
+                              DownloadTask?>(
+                            key: ValueKey(taskId),
+                            selector: (_, service) {
+                              try {
+                                return service.tasks
+                                    .firstWhere((t) => t.id == taskId);
+                              } catch (_) {
+                                return null;
+                              }
+                            },
+                            builder: (context, task, child) {
+                              if (task == null) return const SizedBox.shrink();
+                              return _DownloadTaskCard(
+                                task: task,
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               ),
             ],
@@ -231,171 +239,65 @@ class _DownloadListState extends State<DownloadList> {
   }
 
   Widget _buildToolbar(BuildContext context) {
+    // WinUI 3 CommandBar：subtle 图标按钮 32×32，按钮间距 4，
+    // 生效中的筛选用 accent 填充表达“已激活”，而不是把图标染色了事。
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       child: Row(
         children: [
-          // 搜索按钮
-          IconButton(
-            icon: Icon(
-              CustomIcons.FluentIcons.searchIcon,
-              size: 14,
-              color:
-                  _showSearch ? AppTheme.accentLight : AppTheme.textSecondary,
-            ),
+          FluentIconButton(
+            icon: CustomIcons.FluentIcons.searchIcon,
+            tooltip: t.downloadSearchPlaceholder,
+            selected: _showSearch,
             onPressed: () => setState(() => _showSearch = !_showSearch),
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (_showSearch) {
-                  return AppTheme.accentPrimary.withValues(alpha: 0.1);
-                }
-                if (states.isHovered) {
-                  return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                }
-                return Colors.transparent;
-              }),
-            ),
           ),
-          const SizedBox(width: 8),
-          // 筛选按钮
-          IconButton(
-            icon: Icon(
-              CustomIcons.FluentIcons.filter,
-              size: 14,
-              color: _filterStatus != null
-                  ? AppTheme.accentLight
-                  : AppTheme.textSecondary,
-            ),
+          const SizedBox(width: 4),
+          FluentIconButton(
+            icon: CustomIcons.FluentIcons.filter,
+            tooltip: t.downloadFilterTitle,
+            selected: _filterStatus != null,
             onPressed: () => _showFilterDialog(context),
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (_filterStatus != null) {
-                  return AppTheme.accentPrimary.withValues(alpha: 0.1);
-                }
-                if (states.isHovered) {
-                  return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                }
-                return Colors.transparent;
-              }),
-            ),
           ),
-          const SizedBox(width: 8),
-          // 标签筛选按钮
-          IconButton(
-            icon: Icon(
-              CustomIcons.FluentIcons.tag,
-              size: 14,
-              color: _filterTag != null
-                  ? AppTheme.accentLight
-                  : AppTheme.textSecondary,
-            ),
+          const SizedBox(width: 4),
+          FluentIconButton(
+            icon: CustomIcons.FluentIcons.tag,
+            tooltip: t.tagFilterTitle,
+            selected: _filterTag != null,
             onPressed: () => _showTagFilterDialog(context),
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (_filterTag != null) {
-                  return AppTheme.accentPrimary.withValues(alpha: 0.1);
-                }
-                if (states.isHovered) {
-                  return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                }
-                return Colors.transparent;
-              }),
-            ),
           ),
-          const SizedBox(width: 8),
-          // 排序按钮
-          IconButton(
-            icon: Icon(
-              _sortOrder == 'newest'
-                  ? CustomIcons.FluentIcons.sort_down
-                  : CustomIcons.FluentIcons.sort_up,
-              size: 14,
-              color: AppTheme.textSecondary,
-            ),
+          const SizedBox(width: 4),
+          FluentIconButton(
+            icon: _sortOrder == 'newest'
+                ? CustomIcons.FluentIcons.sort_down
+                : CustomIcons.FluentIcons.sort_up,
+            tooltip: t.downloadSortTitle,
             onPressed: () => _showSortDialog(context),
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (states.isHovered) {
-                  return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                }
-                return Colors.transparent;
-              }),
-            ),
           ),
           const Spacer(),
-          // 显示当前筛选状态
-          if (_filterStatus != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.accentPrimary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                border: Border.all(
-                  color: AppTheme.accentPrimary.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _getStatusFilterText(_filterStatus!),
-                    style: FluentTheme.of(context).typography.caption?.copyWith(
-                          color: AppTheme.accentLight,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
+          // 生效中的筛选条件：WinUI 可移除标签
+          AnimatedSize(
+            duration: AppTheme.motionNormal,
+            curve: AppTheme.motionStandard,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_filterStatus != null)
+                  _RemovableFilterChip(
+                    label: _getStatusFilterText(_filterStatus!),
+                    onRemove: () => setState(() => _filterStatus = null),
                   ),
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: () => setState(() => _filterStatus = null),
-                    child: Icon(
-                      CustomIcons.FluentIcons.chrome_close,
-                      size: 10,
-                      color: AppTheme.accentLight,
-                    ),
+                if (_filterTag != null) ...[
+                  if (_filterStatus != null) const SizedBox(width: 8),
+                  _RemovableFilterChip(
+                    icon: CustomIcons.FluentIcons.tag,
+                    label: _filterTag!,
+                    onRemove: () => setState(() => _filterTag = null),
                   ),
                 ],
-              ),
+              ],
             ),
-          if (_filterTag != null) ...[
-            if (_filterStatus != null) const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.accentPrimary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                border: Border.all(
-                  color: AppTheme.accentPrimary.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _filterTag!,
-                    style: FluentTheme.of(context).typography.caption?.copyWith(
-                          color: AppTheme.accentLight,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                  ),
-                  const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: () => setState(() => _filterTag = null),
-                    child: Icon(
-                      CustomIcons.FluentIcons.chrome_close,
-                      size: 10,
-                      color: AppTheme.accentLight,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ],
       ),
     );
@@ -477,39 +379,35 @@ class _DownloadListState extends State<DownloadList> {
                     runSpacing: 6,
                     children: tags.map((tag) {
                       final isSelected = _filterTag == tag;
-                      return GestureDetector(
-                        onTap: () {
+                      return FluentInteractiveSurface(
+                        onPressed: () {
                           setState(() => _filterTag = tag);
                           Navigator.pop(context);
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
+                        pressedScale: 0.97,
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusRound),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppTheme.accentPrimary.withValues(alpha: 0.45)
+                              : AppTheme.borderDefault,
+                        ),
+                        colors: isSelected
+                            ? FluentInteractionColors.accent()
+                            : FluentInteractionColors.card(),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        child: Text(
+                          tag,
+                          style: TextStyle(
                             color: isSelected
-                                ? AppTheme.accentPrimary.withValues(alpha: 0.2)
-                                : AppTheme.bgLayer2,
-                            borderRadius:
-                                BorderRadius.circular(AppTheme.radiusRound),
-                            border: Border.all(
-                              color: isSelected
-                                  ? AppTheme.accentPrimary
-                                      .withValues(alpha: 0.4)
-                                  : AppTheme.borderSubtle,
-                            ),
-                          ),
-                          child: Text(
-                            tag,
-                            style: FluentTheme.of(context)
-                                .typography
-                                .caption
-                                ?.copyWith(
-                                  color: isSelected
-                                      ? AppTheme.accentLight
-                                      : AppTheme.textSecondary,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                ? (AppTheme.isDarkContext(context)
+                                    ? AppTheme.accentLight
+                                    : AppTheme.accentPrimary)
+                                : AppTheme.textSecondary,
+                            fontSize: 12,
+                            fontWeight:
+                                isSelected ? FontWeight.w600 : FontWeight.w400,
                           ),
                         ),
                       );
@@ -565,131 +463,28 @@ class _DownloadListState extends State<DownloadList> {
 
   Widget _buildSortOption(BuildContext context, String value, String label,
       IconData icon, String description) {
-    final isSelected = _sortOrder == value;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: GestureDetector(
-        onTap: () {
-          _saveSortOrder(value);
-          Navigator.pop(context);
-        },
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? AppTheme.accentPrimary.withValues(alpha: 0.1)
-                : AppTheme.bgLayer2.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.accentPrimary.withValues(alpha: 0.5)
-                  : AppTheme.borderSubtle.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color:
-                    isSelected ? AppTheme.accentLight : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: FluentTheme.of(context).typography.body?.copyWith(
-                            color: isSelected
-                                ? AppTheme.accentLight
-                                : AppTheme.textPrimary,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                          ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      description,
-                      style:
-                          FluentTheme.of(context).typography.caption?.copyWith(
-                                color: AppTheme.textTertiary,
-                                fontSize: 12,
-                              ),
-                    ),
-                  ],
-                ),
-              ),
-              if (isSelected)
-                Icon(
-                  CustomIcons.FluentIcons.check_mark,
-                  size: 16,
-                  color: AppTheme.accentLight,
-                ),
-            ],
-          ),
-        ),
-      ),
+    return _OptionRow(
+      icon: icon,
+      label: label,
+      description: description,
+      isSelected: _sortOrder == value,
+      onTap: () {
+        _saveSortOrder(value);
+        Navigator.pop(context);
+      },
     );
   }
 
   Widget _buildFilterOption(BuildContext context, DownloadStatus? status,
       String label, IconData icon) {
-    final isSelected = _filterStatus == status;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: GestureDetector(
-        onTap: () {
-          setState(() => _filterStatus = status);
-          Navigator.pop(context);
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? AppTheme.accentPrimary.withValues(alpha: 0.1)
-                : AppTheme.bgLayer2.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.accentPrimary.withValues(alpha: 0.5)
-                  : AppTheme.borderSubtle.withValues(alpha: 0.3),
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 14,
-                color:
-                    isSelected ? AppTheme.accentLight : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                label,
-                style: FluentTheme.of(context).typography.body?.copyWith(
-                      color: isSelected
-                          ? AppTheme.accentLight
-                          : AppTheme.textPrimary,
-                      fontWeight:
-                          isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-              ),
-              const Spacer(),
-              if (isSelected)
-                Icon(
-                  CustomIcons.FluentIcons.check_mark,
-                  size: 14,
-                  color: AppTheme.accentLight,
-                ),
-            ],
-          ),
-        ),
-      ),
+    return _OptionRow(
+      icon: icon,
+      label: label,
+      isSelected: _filterStatus == status,
+      onTap: () {
+        setState(() => _filterStatus = status);
+        Navigator.pop(context);
+      },
     );
   }
 
@@ -780,12 +575,9 @@ class _DownloadListState extends State<DownloadList> {
       margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-          width: 1,
-        ),
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderDefault),
       ),
       child: Row(
         children: [
@@ -833,25 +625,33 @@ class _DownloadListState extends State<DownloadList> {
         children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 6),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                value,
-                style: FluentTheme.of(context).typography.bodyStrong?.copyWith(
-                      color: color,
-                      fontSize: 13,
-                    ),
-              ),
-              Text(
-                label,
-                style: FluentTheme.of(context).typography.caption?.copyWith(
-                      color: AppTheme.textTertiary,
-                      fontSize: 10,
-                    ),
-              ),
-            ],
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -861,8 +661,8 @@ class _DownloadListState extends State<DownloadList> {
   Widget _buildDivider() {
     return Container(
       width: 1,
-      height: 30,
-      color: AppTheme.borderSubtle,
+      height: 26,
+      color: AppTheme.borderDefault,
     );
   }
 
@@ -912,84 +712,65 @@ class _DownloadListState extends State<DownloadList> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
+    // WinUI 3 的入场动效是“淡入 + 轻微上移”，不做弹跳/发光 —— 这里统一到标准曲线
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 1200),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.elasticOut,
-            builder: (context, value, child) {
-              return Transform.scale(
-                scale: value,
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.accentPrimary
-                            .withValues(alpha: 0.3 * value),
-                        blurRadius: 60 * value,
-                        spreadRadius: 10 * value,
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    CustomIcons.FluentIcons.download,
-                    size: 40,
-                    color: AppTheme.accentPrimary.withValues(alpha: 0.6),
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 800),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(
-                  opacity: value,
-                  child: Text(
-                    t.downloadEmptyTitle,
-                    style:
-                        FluentTheme.of(context).typography.subtitle?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary,
-                            ),
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 1000),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(
-                  opacity: value,
-                  child: Text(
-                    t.downloadEmptySubtitle,
-                    style: FluentTheme.of(context).typography.body?.copyWith(
-                          color: AppTheme.textTertiary,
-                        ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
+      child: _FadeUpEntrance(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CustomIcons.FluentIcons.download,
+              size: 40,
+              color: AppTheme.textDisabled,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              t.downloadEmptyTitle,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              t.downloadEmptySubtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+/// WinUI 标准入场：150ms 淡入 + 8px 上移，无弹跳。
+class _FadeUpEntrance extends StatelessWidget {
+  final Widget child;
+
+  const _FadeUpEntrance({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: AppTheme.motionNormal,
+      curve: AppTheme.motionStandard,
+      builder: (context, value, inner) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 8 * (1 - value)),
+            child: inner,
+          ),
+        );
+      },
+      child: child,
     );
   }
 }
@@ -1056,20 +837,30 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
         defaultValue: false,
       ),
     );
+    // IP 归属地徽标有独立开关，与 show_http_connectivity_badges 无关。
+    // 这里只 select 一个 bool：GeoIpService 每次解析完成后的 notifyListeners()
+    // 不会因此重建整张卡片；真正的路由数据由 GeoRouteBadge 内部自行 watch。
+    // 外层的 Selector<IntegratedDownloadService, DownloadTask?> 只过滤它自身
+    // Provider 的通知，不会阻断 GeoIpService 对徽标 Element 的定向重建，
+    // RepaintBoundary 同样只影响绘制分层、不影响重建传播——无需额外处理。
+    final showGeoRouteBadge =
+        context.select<GeoIpService, bool>((geo) => geo.enabled);
     final isActive = widget.task.status == DownloadStatus.downloading;
 
+    // WinUI 3 卡片：surfaceCard + 中性描边，hover 仅 subtle 填充变化；
+    // 活跃任务保留 subtle accent 描边作为功能提示
     return AnimatedCard(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: EdgeInsets.zero,
       padding: EdgeInsets.zero,
-      backgroundColor:
-          AppTheme.cardBackground(darkAlpha: 0.78, lightAlpha: 0.85),
-      hoverColor:
-          AppTheme.cardHoverBackground(darkAlpha: 0.88, lightAlpha: 0.95),
+      backgroundColor: AppTheme.surfaceCard,
+      hoverColor: AppTheme.surfaceCardHover,
       borderColor: isActive
-          ? AppTheme.accentPrimary.withValues(alpha: 0.3)
-          : AppTheme.borderSubtle,
-      hoverBorderColor: AppTheme.accentPrimary.withValues(alpha: 0.5),
-      borderRadius: AppTheme.radiusLg,
+          ? AppTheme.accentPrimary.withValues(alpha: 0.32)
+          : AppTheme.borderDefault,
+      hoverBorderColor: isActive
+          ? AppTheme.accentPrimary.withValues(alpha: 0.32)
+          : AppTheme.borderStrong,
+      borderRadius: AppTheme.radiusSm,
       enableScaleAnimation: false,
       enableGlowAnimation: isActive,
       child: Stack(
@@ -1081,7 +872,7 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
                   widget.task.status == DownloadStatus.failed))
             Positioned.fill(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                 child: SpeedChartWidget(
                   taskId: widget.task.id,
                   currentSpeed: widget.task.speed ?? 0,
@@ -1108,7 +899,7 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
                   widget.task.status == DownloadStatus.failed))
             Positioned.fill(
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 1.5, sigmaY: 1.5),
                   child: Container(color: Colors.transparent),
@@ -1117,11 +908,15 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
             ),
           // 卡片内容
           Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(downloadService, showHttpConnectivityBadges),
+                _buildHeader(
+                  downloadService,
+                  showHttpConnectivityBadges,
+                  showGeoRouteBadge,
+                ),
                 const SizedBox(height: 16),
                 _buildTagsRow(),
                 _buildProgressSection(),
@@ -1142,10 +937,21 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
     );
   }
 
+  /// BT / ED2K 等插件任务没有 HTTP 协商，也没有可解析的主机名，
+  /// 这些徽标只会显示成「HTTP --」「未知」这类噪音。
+  bool get _isHttpTask {
+    final url = widget.task.url.trim().toLowerCase();
+    return url.startsWith('http://') || url.startsWith('https://');
+  }
+
   Widget _buildHeader(
     IntegratedDownloadService service,
-    bool showHttpConnectivityBadges,
+    bool showHttpConnectivityBadgesSetting,
+    bool showGeoRouteBadgeSetting,
   ) {
+    final showHttpConnectivityBadges =
+        showHttpConnectivityBadgesSetting && _isHttpTask;
+    final showGeoRouteBadge = showGeoRouteBadgeSetting && _isHttpTask;
     final showResumeDecisionBadge =
         (widget.task.resumeDecisionLabel ?? '').trim().isNotEmpty;
     final showHttpDecisionBadge =
@@ -1218,7 +1024,11 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
                   ],
                 ],
               ),
-              if (showHttpConnectivityBadges || showResumeDecisionBadge) ...[
+              // 归属地徽标是独立开关，必须一并参与 Wrap 的显示判定，
+              // 否则在 HTTP 连通性徽标关闭（默认）时整个 Wrap 都不会渲染。
+              if (showHttpConnectivityBadges ||
+                  showResumeDecisionBadge ||
+                  showGeoRouteBadge) ...[
                 const SizedBox(height: 6),
                 Wrap(
                   spacing: 6,
@@ -1231,6 +1041,11 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
                       _buildConcurrencyCapBadge(),
                     if (showHttpConnectivityBadges) _buildConnectivityBadge(),
                     if (showResumeDecisionBadge) _buildResumeDecisionBadge(),
+                    if (showGeoRouteBadge)
+                      GeoRouteBadge(
+                        url: widget.task.url,
+                        downloadSpeed: widget.task.speed ?? 0,
+                      ),
                   ],
                 ),
               ],
@@ -1482,22 +1297,30 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
     );
   }
 
-  // 状态指示器（简化版，无动画）
+  // 状态指示：WinUI InfoBadge 风格胶囊（圆点 + 文案），比裸圆点更易读
   Widget _buildStatusIndicator() {
-    final color = _getStatusColor();
-
-    return Container(
-      width: 10,
-      height: 10,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: AppTheme.surfaceCard,
-          width: 2,
-        ),
-      ),
+    return _StatusPill(
+      status: widget.task.status,
+      color: _getStatusColor(),
+      label: _getStatusLabel(),
     );
+  }
+
+  String _getStatusLabel() {
+    switch (widget.task.status) {
+      case DownloadStatus.pending:
+        return t.downloadStatusPending;
+      case DownloadStatus.downloading:
+        return t.downloadStatusDownloading;
+      case DownloadStatus.paused:
+        return t.downloadStatusPaused;
+      case DownloadStatus.completed:
+        return t.downloadStatusCompleted;
+      case DownloadStatus.failed:
+        return t.downloadStatusFailed;
+      case DownloadStatus.merging:
+        return t.downloadStatusMerging;
+    }
   }
 
   Widget _buildUrlWithCopy() {
@@ -1574,65 +1397,75 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
     }
   }
 
+  /// WinUI 3 命令区：subtle 图标按钮 32×32、间距 4。
+  /// 按钮集合随任务状态变化，用 [AnimatedSize] 让宽度变化平滑过渡。
   Widget _buildActionButtons(IntegratedDownloadService service) {
     final isMerging = widget.task.status == DownloadStatus.merging;
     final hasRetryableSegments = widget.task.hasRetryableSegments;
     final isFailed = widget.task.status == DownloadStatus.failed;
+    final canStart = widget.task.status == DownloadStatus.pending ||
+        widget.task.status == DownloadStatus.paused;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (!isMerging &&
-            (widget.task.status == DownloadStatus.pending ||
-                widget.task.status == DownloadStatus.paused))
-          _ActionButton(
-            icon: CustomIcons.FluentIcons.play,
-            color: AppTheme.statusSuccess,
-            onPressed: () => service.startTask(widget.task.id),
-            tooltip: t.downloadActionStart,
-          ),
-        if (!isMerging && widget.task.status == DownloadStatus.downloading)
-          _ActionButton(
-            icon: CustomIcons.FluentIcons.pause,
-            color: AppTheme.statusWarning,
-            onPressed: () => service.pauseTask(widget.task.id),
-            tooltip: t.downloadActionPause,
-          ),
-        // 添加间距
-        if (!isMerging &&
-            (widget.task.status == DownloadStatus.pending ||
-                widget.task.status == DownloadStatus.paused ||
-                widget.task.status == DownloadStatus.downloading))
-          const SizedBox(width: 6),
-        // 重试失败分段按钮 - 显示在删除按钮左边
-        if (!isMerging && (hasRetryableSegments || isFailed)) ...[
-          _ActionButton(
-            icon: CustomIcons.FluentIcons.refresh,
-            color: AppTheme.accentLight,
-            onPressed: () => service.retryFailedSegments(widget.task.id),
-            tooltip: hasRetryableSegments
-                ? t.downloadActionRetrySegments
-                : t.downloadActionRetryAll,
-          ),
-          const SizedBox(width: 6),
-        ],
-        if (!isMerging) ...[
-          _ActionButton(
-            icon: CustomIcons.FluentIcons.tag,
-            color: AppTheme.accentLight,
-            onPressed: _editTags,
-            tooltip: t.tagActionLabel,
-          ),
-          const SizedBox(width: 6),
-        ],
-        if (!isMerging)
-          _ActionButton(
-            icon: CustomIcons.FluentIcons.delete,
-            color: AppTheme.statusError,
-            onPressed: () => _confirmDelete(service),
-            tooltip: t.downloadActionDelete,
-          ),
-      ],
+    final buttons = <Widget>[];
+    void add(Widget button) {
+      if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 4));
+      buttons.add(button);
+    }
+
+    if (!isMerging) {
+      if (canStart) {
+        add(FluentIconButton(
+          key: const ValueKey('start'),
+          icon: CustomIcons.FluentIcons.play,
+          accentColor: AppTheme.statusSuccess,
+          tooltip: t.downloadActionStart,
+          onPressed: () => service.startTask(widget.task.id),
+        ));
+      } else if (widget.task.status == DownloadStatus.downloading) {
+        add(FluentIconButton(
+          key: const ValueKey('pause'),
+          icon: CustomIcons.FluentIcons.pause,
+          accentColor: AppTheme.statusWarning,
+          tooltip: t.downloadActionPause,
+          onPressed: () => service.pauseTask(widget.task.id),
+        ));
+      }
+
+      if (hasRetryableSegments || isFailed) {
+        add(FluentIconButton(
+          key: const ValueKey('retry'),
+          icon: CustomIcons.FluentIcons.refresh,
+          accentColor: AppTheme.accentLight,
+          tooltip: hasRetryableSegments
+              ? t.downloadActionRetrySegments
+              : t.downloadActionRetryAll,
+          onPressed: () => service.retryFailedSegments(widget.task.id),
+        ));
+      }
+
+      add(FluentIconButton(
+        key: const ValueKey('tags'),
+        icon: CustomIcons.FluentIcons.tag,
+        accentColor: AppTheme.accentLight,
+        tooltip: t.tagActionLabel,
+        onPressed: _editTags,
+      ));
+
+      add(FluentIconButton(
+        key: const ValueKey('delete'),
+        icon: CustomIcons.FluentIcons.delete,
+        accentColor: AppTheme.statusError,
+        tinted: true,
+        tooltip: t.downloadActionDelete,
+        onPressed: () => _confirmDelete(service),
+      ));
+    }
+
+    return AnimatedSize(
+      duration: AppTheme.motionNormal,
+      curve: AppTheme.motionStandard,
+      alignment: Alignment.centerRight,
+      child: Row(mainAxisSize: MainAxisSize.min, children: buttons),
     );
   }
 
@@ -1646,46 +1479,42 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
         widget.task.startupStatusKey == 'matching_http_protocol';
     final isDark = AppTheme.isDarkContext(context);
 
+    final accent = isDark ? AppTheme.accentLight : AppTheme.accentPrimary;
+    // 进度条颜色随状态走：暂停用中性灰、失败用错误色，和状态胶囊保持一致
+    final barColor = switch (widget.task.status) {
+      DownloadStatus.paused => AppTheme.textTertiary,
+      DownloadStatus.failed => AppTheme.statusError,
+      _ => AppTheme.accentPrimary,
+    };
+
     // 合并状态：特殊布局
     if (isMerging) {
       return Row(
         children: [
-          // 左侧加载圈圈
           const SizedBox(
             width: 16,
             height: 16,
             child: ProgressRing(strokeWidth: 2),
           ),
-          const SizedBox(width: 8),
-          // 文字
+          const SizedBox(width: 10),
           Text(
             t.downloadMergingStatus,
             style: FluentTheme.of(context).typography.caption?.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.accentPrimary,
+                  color: accent,
                   fontSize: 12,
                 ),
           ),
           const SizedBox(width: 12),
-          // 中间短进度条
-          SizedBox(
-            width: 120,
-            height: 6,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-              child: const ProgressBar(strokeWidth: 6),
+          Expanded(
+            child: FluentProgressTrack(
+              value: progress,
+              height: 6,
+              color: AppTheme.accentPrimary,
             ),
           ),
           const SizedBox(width: 12),
-          // 右侧百分比
-          Text(
-            '${(progress * 100).toStringAsFixed(1)}%',
-            style: FluentTheme.of(context).typography.caption?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? AppTheme.accentLight : AppTheme.accentPrimary,
-                  fontSize: 12,
-                ),
-          ),
+          _AnimatedPercentage(value: progress, color: accent),
         ],
       );
     }
@@ -1696,102 +1525,74 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
       children: [
         // 进度信息行
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // 左侧：已下载/总大小
-            if (!isUnknownSize &&
-                widget.task.fileSize != null &&
-                widget.task.fileSize! > 0)
-              Text(
-                '${_formatBytes((widget.task.fileSize! * progress).round())} / ${_formatBytes(widget.task.fileSize!)}',
+            Expanded(
+              child: Text(
+                (!isUnknownSize &&
+                        widget.task.fileSize != null &&
+                        widget.task.fileSize! > 0)
+                    ? '${_formatBytes((widget.task.fileSize! * progress).round())} / ${_formatBytes(widget.task.fileSize!)}'
+                    : isMatchingHttpProtocol
+                        ? t.downloadMatchingHttpProtocol
+                        : t.downloadCalculatingSize,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: FluentTheme.of(context).typography.caption?.copyWith(
                       color: AppTheme.textSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w400,
                     ),
-              )
-            else
+              ),
+            ),
+            const SizedBox(width: 12),
+            // WinUI 3：百分比是正文强调文本，而不是一个彩色药丸
+            if (isUnknownSize)
               Text(
                 isMatchingHttpProtocol
-                    ? t.downloadMatchingHttpProtocol
-                    : t.downloadCalculatingSize,
+                    ? t.downloadMatchingHttpProtocolShort
+                    : t.downloadCalculating,
                 style: FluentTheme.of(context).typography.caption?.copyWith(
+                      fontWeight: FontWeight.w600,
                       color: AppTheme.textTertiary,
                       fontSize: 12,
                     ),
-              ),
-
-            // 右侧：百分比
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.accentPrimary.withValues(
-                  alpha: isDark ? 0.12 : 0.08,
-                ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-              ),
-              child: Text(
-                isUnknownSize
-                    ? (isMatchingHttpProtocol
-                        ? t.downloadMatchingHttpProtocolShort
-                        : t.downloadCalculating)
-                    : '${(progress * 100).toStringAsFixed(1)}%',
-                style: FluentTheme.of(context).typography.caption?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: isDark
-                          ? AppTheme.accentLight
-                          : AppTheme.accentPrimary,
-                      fontSize: 12,
-                      letterSpacing: 0.5,
-                    ),
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 10),
-
-        // 进度条 - 优化：移除boxShadow提升性能
-        Stack(
-          children: [
-            // 背景轨道
-            Container(
-              height: 8,
-              decoration: BoxDecoration(
-                color: AppTheme.bgLayer2.withValues(alpha: isDark ? 0.6 : 0.92),
-                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-              ),
-            ),
-            // 进度填充
-            if (!isUnknownSize)
-              FractionallySizedBox(
-                alignment: Alignment.centerLeft,
-                widthFactor: progress,
-                child: Container(
-                  height: 8,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        AppTheme.accentPrimary,
-                        isDark
-                            ? AppTheme.accentLight
-                            : AppTheme.accentPrimary.withValues(alpha: 0.72),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                  ),
-                ),
               )
             else
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                child: const SizedBox(
-                  height: 8,
-                  child: ProgressBar(strokeWidth: 8),
-                ),
+              _AnimatedPercentage(
+                value: progress,
+                color: widget.task.status == DownloadStatus.failed
+                    ? AppTheme.statusError
+                    : widget.task.status == DownloadStatus.paused
+                        ? AppTheme.textSecondary
+                        : accent,
+                fontSize: 13,
               ),
           ],
         ),
+
+        const SizedBox(height: 8),
+
+        // WinUI 3 ProgressBar：6px 轨道 + 补间动画（进度不再逐帧跳变）
+        FluentProgressTrack(
+          value: progress,
+          height: 6,
+          color: barColor,
+          indeterminate: isUnknownSize,
+        ),
+
+        // 插件任务（BT / ED2K）的连接细节：没有它时「等待中」看不出原因
+        if ((widget.task.statusDetail ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            widget.task.statusDetail!.trim(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: FluentTheme.of(context).typography.caption?.copyWith(
+                  color: AppTheme.textTertiary,
+                  fontSize: 11,
+                ),
+          ),
+        ],
 
         // 分段进度（如果有）
         if (widget.task.segments != null &&
@@ -1820,43 +1621,44 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
-          onTap: () =>
+        // WinUI Expander header：整块可点，hover/press 高亮与命中区域等大
+        FluentInteractiveSurface(
+          onPressed: () =>
               setState(() => _isSegmentsExpanded = !_isSegmentsExpanded),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-            decoration: BoxDecoration(
-              color: AppTheme.bgLayer2,
-              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  CustomIcons.FluentIcons.split_object,
-                  size: 12,
+          colors: FluentInteractionColors(
+            rest: AppTheme.subtleFillHover,
+            hovered: AppTheme.surfaceCardHover,
+            pressed: AppTheme.subtleFillPressed,
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                CustomIcons.FluentIcons.split_object,
+                size: 12,
+                color: AppTheme.textTertiary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                t.downloadSegmentsTitleWithCount(segments.length),
+                style: FluentTheme.of(context).typography.caption?.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+              ),
+              const SizedBox(width: 6),
+              AnimatedRotation(
+                turns: _isSegmentsExpanded ? 0.5 : 0,
+                duration: AppTheme.motionNormal,
+                curve: AppTheme.motionStandard,
+                child: Icon(
+                  CustomIcons.FluentIcons.chevron_down,
+                  size: 10,
                   color: AppTheme.textTertiary,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  t.downloadSegmentsTitleWithCount(segments.length),
-                  style: FluentTheme.of(context).typography.caption?.copyWith(
-                        color: AppTheme.textSecondary,
-                        fontSize: 11,
-                      ),
-                ),
-                const SizedBox(width: 6),
-                AnimatedRotation(
-                  turns: _isSegmentsExpanded ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(
-                    CustomIcons.FluentIcons.chevron_down,
-                    size: 10,
-                    color: AppTheme.textTertiary,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
         AnimatedCrossFade(
@@ -1865,7 +1667,8 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
           crossFadeState: _isSegmentsExpanded
               ? CrossFadeState.showSecond
               : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 200),
+          duration: AppTheme.motionNormal,
+          sizeCurve: AppTheme.motionStandard,
         ),
       ],
     );
@@ -1955,43 +1758,31 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
             // 快速重试按钮
             if (failedCount > 0) ...[
               const SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => context
+              FluentInteractiveSurface(
+                onPressed: () => context
                     .read<IntegratedDownloadService>()
                     .retryFailedSegments(widget.task.id),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accentLight.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: AppTheme.accentLight.withValues(alpha: 0.3),
-                      width: 0.5,
+                colors: FluentInteractionColors.tinted(AppTheme.accentPrimary),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                pressedScale: 0.96,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      CustomIcons.FluentIcons.refresh,
+                      size: 9,
+                      color: AppTheme.accentLight,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        CustomIcons.FluentIcons.refresh,
-                        size: 8,
+                    const SizedBox(width: 4),
+                    Text(
+                      t.downloadRetryButton,
+                      style: TextStyle(
                         color: AppTheme.accentLight,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w500,
                       ),
-                      const SizedBox(width: 3),
-                      Text(
-                        t.downloadRetryButton,
-                        style: FluentTheme.of(context)
-                            .typography
-                            .caption
-                            ?.copyWith(
-                              color: AppTheme.accentLight,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w400,
-                            ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -2183,40 +1974,46 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
   }
 
   Widget _buildShowMoreButton(int totalCount) {
-    return GestureDetector(
-      onTap: () => setState(() => _showAllSegments = !_showAllSegments),
-      child: Container(
-        margin: const EdgeInsets.only(top: 4),
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-        decoration: BoxDecoration(
-          color: AppTheme.accentPrimary.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-          border: Border.all(
-            color: AppTheme.accentPrimary.withValues(alpha: 0.2),
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: FluentInteractiveSurface(
+          onPressed: () => setState(() => _showAllSegments = !_showAllSegments),
+          colors: FluentInteractionColors.tinted(AppTheme.accentPrimary),
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+          pressedScale: 0.98,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedRotation(
+                turns: _showAllSegments ? 0.5 : 0,
+                duration: AppTheme.motionNormal,
+                curve: AppTheme.motionStandard,
+                child: Icon(
+                  CustomIcons.FluentIcons.chevron_down_small,
+                  size: 12,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _showAllSegments
+                    ? t.downloadSegmentsCollapse
+                    : t.downloadSegmentsShowAll(
+                        totalCount - _maxVisibleSegments),
+                style: FluentTheme.of(context).typography.caption?.copyWith(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                    ),
+              ),
+            ],
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              _showAllSegments
-                  ? CustomIcons.FluentIcons.chevron_up_small
-                  : CustomIcons.FluentIcons.chevron_down_small,
-              size: 12,
-              color: AppTheme.accentLight,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              _showAllSegments
-                  ? t.downloadSegmentsCollapse
-                  : t.downloadSegmentsShowAll(totalCount - _maxVisibleSegments),
-              style: FluentTheme.of(context).typography.caption?.copyWith(
-                    color: AppTheme.accentLight,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                  ),
-            ),
-          ],
         ),
       ),
     );
@@ -2252,126 +2049,93 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
         widget.task.segments?.where((s) => s.isDownloading).length ?? 0;
     final speed = widget.task.speed ?? 0;
 
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+    final showRemaining = !isUnknownSize &&
+        widget.task.remainingTime != null &&
+        widget.task.remainingTime!.inSeconds > 0;
+
+    // WinUI 3：单层 subtle 底色的信息条，内部只用图标 + 文本，不再层层套彩色方块
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        color: AppTheme.subtleFillHover,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
       ),
       child: Row(
         children: [
-          // 速度显示器
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppTheme.accentPrimary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  CustomIcons.FluentIcons.speed_high,
-                  size: 14,
-                  color: AppTheme.accentLight,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _formatSpeed(speed),
-                  style: FluentTheme.of(context).typography.caption?.copyWith(
-                        color: AppTheme.accentLight,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.3,
-                      ),
-                ),
-              ],
+          Icon(CustomIcons.FluentIcons.speed_high, size: 14, color: accent),
+          const SizedBox(width: 6),
+          Text(
+            _formatSpeed(speed),
+            style: TextStyle(
+              color: accent,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
-
-          const SizedBox(width: 12),
-
-          // 分段信息
           if (segmentCount > 1) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.bgLayer2.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    CustomIcons.FluentIcons.split_object,
-                    size: 11,
-                    color: AppTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$activeSegments/$segmentCount',
-                    style: FluentTheme.of(context).typography.caption?.copyWith(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                  ),
-                ],
+            _buildSpeedInfoDivider(),
+            Icon(
+              CustomIcons.FluentIcons.split_object,
+              size: 11,
+              color: AppTheme.textTertiary,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              '$activeSegments/$segmentCount',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
-            const SizedBox(width: 8),
           ],
-
-          // 剩余时间
-          if (!isUnknownSize &&
-              widget.task.remainingTime != null &&
-              widget.task.remainingTime!.inSeconds > 0) ...[
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  CustomIcons.FluentIcons.clock,
-                  size: 11,
-                  color: AppTheme.textTertiary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  widget.task.formattedRemainingTime,
-                  style: FluentTheme.of(context).typography.caption?.copyWith(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                ),
-              ],
+          if (showRemaining) ...[
+            _buildSpeedInfoDivider(),
+            Icon(
+              CustomIcons.FluentIcons.clock,
+              size: 11,
+              color: AppTheme.textTertiary,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 5),
+            Text(
+              widget.task.formattedRemainingTime,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+              ),
+            ),
           ],
-
-          // 分隔线
-          Container(
-            width: 1,
-            height: 16,
-            color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-          ),
-
-          const SizedBox(width: 8),
-
-          // 已下载/总大小
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               isUnknownSize
                   ? t.downloadSizeUnknown(widget.task.formattedDownloadedSize)
                   : '${widget.task.formattedDownloadedSize} / ${widget.task.formattedFileSize}',
-              style: FluentTheme.of(context).typography.caption?.copyWith(
-                    color: AppTheme.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                  ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 12,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSpeedInfoDivider() {
+    return Container(
+      width: 1,
+      height: 12,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      color: AppTheme.borderDefault,
     );
   }
 
@@ -2498,42 +2262,32 @@ class _DownloadTaskCardState extends State<_DownloadTaskCard> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: () =>
+                  FluentInteractiveSurface(
+                    onPressed: () =>
                         downloadService.retryFailedSegments(widget.task.id),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentLight.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(
-                          color: AppTheme.accentLight.withValues(alpha: 0.3),
-                          width: 1,
+                    colors:
+                        FluentInteractionColors.tinted(AppTheme.accentPrimary),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    pressedScale: 0.97,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          CustomIcons.FluentIcons.refresh,
+                          size: 11,
+                          color: AppTheme.accentLight,
                         ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            CustomIcons.FluentIcons.refresh,
-                            size: 10,
+                        const SizedBox(width: 5),
+                        Text(
+                          t.downloadRetryButton,
+                          style: TextStyle(
                             color: AppTheme.accentLight,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            t.downloadRetryButton,
-                            style: FluentTheme.of(context)
-                                .typography
-                                .caption
-                                ?.copyWith(
-                                  color: AppTheme.accentLight,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -2709,63 +2463,297 @@ class _FlatSegmentProgressPainter extends CustomPainter {
   }
 }
 
-/// 操作按钮组件
-class _ActionButton extends StatefulWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onPressed;
-  final String tooltip;
+/// WinUI 3 可移除筛选标签：文字与关闭按钮各自拥有完整命中区域，
+/// 关闭按钮的高亮与它的 20×20 命中区域等大。
+class _RemovableFilterChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final VoidCallback onRemove;
 
-  const _ActionButton({
-    required this.icon,
-    required this.color,
-    required this.onPressed,
-    required this.tooltip,
+  const _RemovableFilterChip({
+    required this.label,
+    required this.onRemove,
+    this.icon,
   });
 
   @override
-  State<_ActionButton> createState() => _ActionButtonState();
+  Widget build(BuildContext context) {
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+
+    return Container(
+      height: 26,
+      constraints: const BoxConstraints(maxWidth: 220),
+      padding: EdgeInsets.only(left: icon == null ? 10 : 8, right: 3),
+      decoration: BoxDecoration(
+        color: AppTheme.accentPrimary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppTheme.radiusRound),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 11, color: accent),
+            const SizedBox(width: 5),
+          ],
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: accent,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          FluentIconButton(
+            icon: CustomIcons.FluentIcons.chrome_close,
+            tooltip: AppLocalizations.of(context)!.downloadFilterAll,
+            size: 20,
+            iconSize: 9,
+            restColor: accent,
+            accentColor: accent,
+            onPressed: onRemove,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _ActionButtonState extends State<_ActionButton> {
-  bool _isHovered = false;
+/// WinUI 3 单选列表行（排序 / 筛选对话框）：
+/// 整行可点，hover/press 高亮铺满整行，选中态用 subtle 填充 + 左侧 accent 指示条。
+class _OptionRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? description;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _OptionRow({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    this.description,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _isHovered = true),
-        onExit: (_) => setState(() => _isHovered = false),
-        child: GestureDetector(
-          onTap: widget.onPressed,
-          child: Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: _isHovered
-                  ? widget.color.withValues(alpha: 0.15)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-              border: Border.all(
-                color: _isHovered
-                    ? widget.color.withValues(alpha: 0.3)
-                    : Colors.transparent,
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: FluentInteractiveSurface(
+        onPressed: onTap,
+        colors: isSelected
+            ? FluentInteractionColors(
+                rest: AppTheme.subtleFillHover,
+                hovered: AppTheme.surfaceCardHover,
+                pressed: AppTheme.subtleFillPressed,
+              )
+            : FluentInteractionColors.subtle(),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Row(
+          children: [
+            // WinUI 选中指示：左侧 3×16 accent pill
+            AnimatedContainer(
+              duration: AppTheme.motionFast,
+              curve: AppTheme.motionStandard,
+              width: 3,
+              height: isSelected ? 16 : 0,
+              margin: const EdgeInsets.only(right: 9),
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            child: Icon(
-              widget.icon,
-              size: 14,
-              color: _isHovered ? widget.color : AppTheme.textSecondary,
+            Icon(
+              icon,
+              size: 15,
+              color: isSelected ? accent : AppTheme.textSecondary,
             ),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textPrimary,
+                      fontWeight:
+                          isSelected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                  if (description != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      description!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.25,
+                        color: AppTheme.textTertiary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(
+                CustomIcons.FluentIcons.check_mark,
+                size: 14,
+                color: accent,
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// 可悬停的URL组件，支持hover动画
+/// 百分比数字：数值变化时做补间，避免下载过程中数字生硬跳动。
+class _AnimatedPercentage extends StatelessWidget {
+  final double value;
+  final Color color;
+  final double fontSize;
+
+  const _AnimatedPercentage({
+    required this.value,
+    required this.color,
+    this.fontSize = 12,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: value.clamp(0.0, 1.0)),
+      duration: AppTheme.motionNormal,
+      curve: AppTheme.motionStandard,
+      builder: (context, animated, _) {
+        return Text(
+          '${(animated * 100).toStringAsFixed(1)}%',
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.w600,
+            color: color,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 下载状态胶囊：WinUI `InfoBadge` 风格；下载/合并时圆点做轻微呼吸动画。
+class _StatusPill extends StatefulWidget {
+  final DownloadStatus status;
+  final Color color;
+  final String label;
+
+  const _StatusPill({
+    required this.status,
+    required this.color,
+    required this.label,
+  });
+
+  @override
+  State<_StatusPill> createState() => _StatusPillState();
+}
+
+class _StatusPillState extends State<_StatusPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  bool get _shouldPulse =>
+      widget.status == DownloadStatus.downloading ||
+      widget.status == DownloadStatus.merging;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+    if (_shouldPulse) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_StatusPill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_shouldPulse && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!_shouldPulse && _pulse.isAnimating) {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dot = RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _pulse,
+        builder: (context, _) {
+          final t = _shouldPulse ? _pulse.value : 0.0;
+          return Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 1.0 - 0.45 * t),
+              shape: BoxShape.circle,
+            ),
+          );
+        },
+      ),
+    );
+
+    return AnimatedContainer(
+      duration: AppTheme.motionFast,
+      curve: AppTheme.motionStandard,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: widget.color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppTheme.radiusRound),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          dot,
+          const SizedBox(width: 6),
+          Text(
+            widget.label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: widget.color,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 可悬停的 URL：hover 时提亮并露出复制图标，点击复制。
 class _HoverableUrl extends StatefulWidget {
   final String url;
   final VoidCallback onTap;
@@ -2782,28 +2770,60 @@ class _HoverableUrl extends StatefulWidget {
 class _HoverableUrlState extends State<_HoverableUrl> {
   bool _isHovered = false;
 
+  void _setHovered(bool value) {
+    if (_isHovered == value) return;
+    setState(() => _isHovered = value);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final color = _isHovered ? AppTheme.textSecondary : AppTheme.textTertiary;
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
       child: GestureDetector(
         onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
         child: Tooltip(
           message: AppLocalizations.of(context)!.downloadCopyTooltip,
-          child: Text(
-            widget.url,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: FluentTheme.of(context).typography.caption?.copyWith(
-                  color: AppTheme.textTertiary,
-                  fontSize: 12,
-                  decoration: _isHovered
-                      ? TextDecoration.underline
-                      : TextDecoration.none,
-                  decorationColor: AppTheme.textTertiary.withValues(alpha: 0.7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: AnimatedDefaultTextStyle(
+                  duration: AppTheme.motionFast,
+                  curve: AppTheme.motionStandard,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    decoration: _isHovered
+                        ? TextDecoration.underline
+                        : TextDecoration.none,
+                    decorationColor: color.withValues(alpha: 0.7),
+                  ),
+                  child: Text(
+                    widget.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+              ),
+              AnimatedOpacity(
+                opacity: _isHovered ? 1 : 0,
+                duration: AppTheme.motionFast,
+                curve: AppTheme.motionStandard,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Icon(
+                    CustomIcons.FluentIcons.copy,
+                    size: 11,
+                    color: AppTheme.textSecondary,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

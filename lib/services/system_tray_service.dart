@@ -11,6 +11,7 @@ import 'package:win32/win32.dart' as win32;
 import 'package:window_manager/window_manager.dart';
 import 'package:path/path.dart' as path;
 
+import 'app_power_mode_service.dart';
 import 'logger_service.dart';
 import 'client_config_service.dart';
 import 'kernel/kernel_manager.dart';
@@ -64,6 +65,9 @@ class SystemTrayService with TrayListener {
     if (!_isInitialized || _isExiting) {
       return;
     }
+    // 托盘菜单会显示活跃任务进度。用户点开它说明还在关注下载，
+    // 退回 background 档让进度重新变成实时的，但窗口仍未打开，所以不升到前台档。
+    AppPowerModeService().noteBackgroundActivity();
     final pendingRequest = _trayMenuRequest;
     if (pendingRequest != null) {
       return pendingRequest;
@@ -240,6 +244,9 @@ class SystemTrayService with TrayListener {
 
   Future<void> showMainWindow() async {
     _logger.info('Show main window');
+    // 先退出精简模式再显示窗口：恢复动作全是同步的（重排定时器、补一次
+    // 通知），所以窗口出现时数据已经是热的，不会先闪一帧旧状态。
+    AppPowerModeService().wakeForForeground();
     try {
       if (Platform.isWindows) {
         await _windowChannel.invokeMethod<void>('bringToFront');

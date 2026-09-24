@@ -40,6 +40,13 @@ add_definitions(-DUNICODE -D_UNICODE)
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
+  # 显式声明源码与执行字符集都是 UTF-8。
+  #
+  # 缺了这个，MSVC 会按系统 ANSI 代码页解释源文件；在中文（CP936）机器上，
+  # 任何一个非 ASCII 字符——哪怕只是注释里的中文——都会触发 C4819，
+  # 而上面的 /WX 又把警告升级成错误，于是构建必然失败。
+  # 这一类问题只在中文环境暴露，英文环境下完全看不出来。
+  target_compile_options(${TARGET} PRIVATE /utf-8)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
@@ -127,6 +134,21 @@ install(CODE "
   " COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
+# NeoNSF is built outside Flutter, but a plain `flutter build windows` must not
+# retain a stale sidecar from an older install. Always clear the bundle slot,
+# then copy the current build when it exists.
+set(NEONSF_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../build/neonsf/win-x64")
+set(NEONSF_BUNDLE_DIR
+  "${INSTALL_BUNDLE_DATA_DIR}/zzbuaoye_assets/neonsf")
+install(CODE "
+  file(REMOVE_RECURSE \"${NEONSF_BUNDLE_DIR}\")
+  " COMPONENT Runtime)
+if(EXISTS "${NEONSF_BUILD_DIR}/HanabiNeoNSF.exe")
+  install(DIRECTORY "${NEONSF_BUILD_DIR}/"
+    DESTINATION "${NEONSF_BUNDLE_DIR}"
+    COMPONENT Runtime)
+endif()
 
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"

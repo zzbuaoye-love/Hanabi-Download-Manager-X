@@ -11,8 +11,14 @@ import '../../services/performance_monitor_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/fluent_icons.dart' as CustomIcons;
 import '../../widgets/animated_notifications.dart';
+import '../../widgets/fluent_interactions.dart';
+import '../../widgets/scroll_edge_fade.dart';
+import '../../widgets/settings_components.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
-import '../../widgets/interactive_animations.dart';
+
+// ============================================================================
+// 通知等级
+// ============================================================================
 
 String _normalizeNoticeMarkdown(String source) {
   return source
@@ -24,105 +30,137 @@ String _normalizeNoticeMarkdown(String source) {
       );
 }
 
+Color _noticeLevelColor(NoticeLevel level) {
+  switch (level) {
+    case NoticeLevel.info:
+      return AppTheme.statusInfo;
+    case NoticeLevel.success:
+      return AppTheme.statusSuccess;
+    case NoticeLevel.warning:
+      return AppTheme.statusWarning;
+    case NoticeLevel.critical:
+      return AppTheme.statusError;
+  }
+}
+
+IconData _noticeLevelIcon(NoticeLevel level) {
+  switch (level) {
+    case NoticeLevel.info:
+      return FluentIcons.info;
+    case NoticeLevel.success:
+      return FluentIcons.completed;
+    case NoticeLevel.warning:
+      return FluentIcons.warning;
+    case NoticeLevel.critical:
+      return FluentIcons.error_badge;
+  }
+}
+
+String _noticeLevelLabel(AppLocalizations t, NoticeLevel level) {
+  switch (level) {
+    case NoticeLevel.info:
+      return t.noticeLevelInfo;
+    case NoticeLevel.success:
+      return t.noticeLevelSuccess;
+    case NoticeLevel.warning:
+      return t.noticeLevelWarning;
+    case NoticeLevel.critical:
+      return t.noticeLevelCritical;
+  }
+}
+
+String _noticeFormatDate(DateTime dt) {
+  return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+}
+
+String _noticeFormatDateTime(DateTime dt) {
+  return '${_noticeFormatDate(dt)} '
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+}
+
+// ============================================================================
+// Markdown 样式
+// ============================================================================
+
 MarkdownStyleSheet _noticeMarkdownStyleSheet(
   BuildContext context, {
   required bool compact,
 }) {
   final isDark = AppTheme.isDarkContext(context);
-  final bodyColor = compact ? AppTheme.textSecondary : AppTheme.textPrimary;
-  final secondaryColor =
-      compact ? AppTheme.textTertiary : AppTheme.textSecondary;
   final accentColor = isDark ? AppTheme.accentLight : AppTheme.accentPrimary;
   final baseTextStyle = FluentTheme.of(context).typography.body?.copyWith(
         fontSize: compact ? 13 : 14,
-        height: compact ? 1.55 : 1.65,
-        color: bodyColor,
+        height: compact ? 1.6 : 1.7,
+        color: compact ? AppTheme.textSecondary : AppTheme.textPrimary,
       );
+  final secondaryColor =
+      compact ? AppTheme.textTertiary : AppTheme.textSecondary;
 
   return MarkdownStyleSheet(
     p: baseTextStyle,
     pPadding: EdgeInsets.only(bottom: compact ? 8 : 10),
     strong: baseTextStyle?.copyWith(
       color: AppTheme.textPrimary,
-      fontWeight: FontWeight.w700,
+      fontWeight: FontWeight.w600,
     ),
     em: baseTextStyle?.copyWith(
       color: secondaryColor,
       fontStyle: FontStyle.italic,
     ),
-    h1: FluentTheme.of(context).typography.title?.copyWith(
-          fontSize: compact ? 20 : 23,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.textPrimary,
-          height: 1.25,
-        ),
-    h1Padding: const EdgeInsets.only(bottom: 14),
-    h2: FluentTheme.of(context).typography.subtitle?.copyWith(
+    // WinUI 排版层级：Subtitle / BodyLarge / BodyStrong
+    h1: FluentTheme.of(context).typography.subtitle?.copyWith(
           fontSize: compact ? 18 : 20,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w600,
           color: AppTheme.textPrimary,
           height: 1.3,
         ),
-    h2Padding: const EdgeInsets.only(top: 4, bottom: 12),
-    h3: FluentTheme.of(context).typography.bodyLarge?.copyWith(
-          fontSize: compact ? 15 : 16,
+    h1Padding: const EdgeInsets.only(top: 4, bottom: 12),
+    h2: FluentTheme.of(context).typography.bodyLarge?.copyWith(
+          fontSize: compact ? 16 : 17,
           fontWeight: FontWeight.w600,
           color: AppTheme.textPrimary,
           height: 1.35,
         ),
-    h3Padding: const EdgeInsets.only(top: 8, bottom: 8),
+    h2Padding: const EdgeInsets.only(top: 8, bottom: 10),
+    h3: FluentTheme.of(context).typography.body?.copyWith(
+          fontSize: compact ? 14 : 15,
+          fontWeight: FontWeight.w600,
+          color: AppTheme.textPrimary,
+          height: 1.4,
+        ),
+    h3Padding: const EdgeInsets.only(top: 8, bottom: 6),
     a: baseTextStyle?.copyWith(
       color: accentColor,
       decoration: TextDecoration.underline,
-      decorationColor: accentColor.withValues(alpha: 0.65),
+      decorationColor: accentColor.withValues(alpha: 0.55),
     ),
     listIndent: compact ? 22 : 26,
-    listBullet: baseTextStyle?.copyWith(
-      color: accentColor,
-      fontWeight: FontWeight.w700,
-    ),
+    listBullet: baseTextStyle?.copyWith(color: accentColor),
     listBulletPadding: const EdgeInsets.only(right: 8),
     blockSpacing: compact ? 8 : 10,
-    blockquote: baseTextStyle?.copyWith(
-      color: secondaryColor,
-      height: compact ? 1.55 : 1.65,
-    ),
-    blockquotePadding: EdgeInsets.fromLTRB(
-      compact ? 12 : 14,
-      compact ? 8 : 10,
-      compact ? 12 : 14,
-      compact ? 8 : 10,
-    ),
+    blockquote: baseTextStyle?.copyWith(color: secondaryColor),
+    blockquotePadding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
     blockquoteDecoration: BoxDecoration(
-      color: AppTheme.bgLayer2.withValues(alpha: isDark ? 0.34 : 0.58),
+      color: AppTheme.subtleFillHover,
       borderRadius: BorderRadius.circular(AppTheme.radiusSm),
       border: Border(
-        left: BorderSide(
-          color: accentColor.withValues(alpha: 0.9),
-          width: 3,
-        ),
+        left: BorderSide(color: accentColor.withValues(alpha: 0.85), width: 3),
       ),
     ),
     code: baseTextStyle?.copyWith(
       fontSize: compact ? 12 : 13,
       fontFamily: 'Consolas',
-      backgroundColor: AppTheme.bgLayer2.withValues(alpha: 0.82),
+      backgroundColor: AppTheme.subtleFillHover,
       color: accentColor,
     ),
     codeblockPadding: const EdgeInsets.all(12),
     codeblockDecoration: BoxDecoration(
-      color: AppTheme.bgLayer2.withValues(alpha: 0.72),
+      color: AppTheme.subtleFillHover,
       borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-      border: Border.all(
-        color: AppTheme.borderSubtle.withValues(alpha: 0.6),
-      ),
+      border: Border.all(color: AppTheme.borderSubtle),
     ),
     horizontalRuleDecoration: BoxDecoration(
-      border: Border(
-        top: BorderSide(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.62),
-        ),
-      ),
+      border: Border(top: BorderSide(color: AppTheme.borderSubtle)),
     ),
   );
 }
@@ -140,13 +178,125 @@ Widget _buildNoticeMarkdown(
       selectable: true,
       styleSheet: _noticeMarkdownStyleSheet(context, compact: compact),
       onTapLink: (text, href, title) {
-        if (href != null) {
-          onLinkTap(href);
-        }
+        if (href != null) onLinkTap(href);
       },
     ),
   );
 }
+
+// ============================================================================
+// 通用小组件
+// ============================================================================
+
+/// 等级图标磁贴：WinUI 用“语义色 + 淡色底”的圆角方块表达严重程度。
+class _NoticeLevelTile extends StatelessWidget {
+  final NoticeLevel level;
+  final double size;
+
+  const _NoticeLevelTile({required this.level, this.size = 28});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _noticeLevelColor(level);
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+      ),
+      child: Icon(_noticeLevelIcon(level), size: size * 0.5, color: color),
+    );
+  }
+}
+
+/// WinUI 3 置顶徽标（subtle accent pill）
+class _NoticePinnedBadge extends StatelessWidget {
+  final double fontSize;
+
+  const _NoticePinnedBadge({this.fontSize = 10});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+
+    return FluentChip(
+      icon: FluentIcons.pin,
+      label: AppLocalizations.of(context)!.noticePinned,
+      color: accent,
+      fontSize: fontSize,
+      iconSize: fontSize - 1,
+    );
+  }
+}
+
+/// WinUI 3 空/错误占位块：图标 + 标题 + 说明 + 操作，层级克制，不用彩色圆形色块。
+class _NoticePlaceholder extends StatelessWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final String title;
+  final String? description;
+  final Widget? action;
+
+  const _NoticePlaceholder({
+    required this.icon,
+    required this.title,
+    this.iconColor,
+    this.description,
+    this.action,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: iconColor ?? AppTheme.textDisabled),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            if (description != null && description!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: Text(
+                  description!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ),
+            ],
+            if (action != null) ...[
+              const SizedBox(height: 20),
+              action!,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// 页面
+// ============================================================================
 
 class NoticePage extends StatefulWidget {
   const NoticePage({super.key});
@@ -156,7 +306,8 @@ class NoticePage extends StatefulWidget {
 }
 
 class _NoticePageState extends State<NoticePage> {
-  Notice? _selectedNotice;
+  /// 只记录 id：列表刷新后仍能定位到同一条通知（记对象会拿到旧快照）
+  String? _selectedNoticeId;
   bool _useSplitView = true;
 
   @override
@@ -177,6 +328,14 @@ class _NoticePageState extends State<NoticePage> {
   }
 
   AppLocalizations get t => AppLocalizations.of(context)!;
+
+  Notice? _selectedNotice(List<Notice> notices) {
+    if (_selectedNoticeId == null) return null;
+    for (final notice in notices) {
+      if (notice.id == _selectedNoticeId) return notice;
+    }
+    return null;
+  }
 
   Future<void> _launchUrl(String url) async {
     try {
@@ -204,66 +363,42 @@ class _NoticePageState extends State<NoticePage> {
   @override
   Widget build(BuildContext context) {
     PerformanceMonitorService().trackRebuild('NoticePage');
-    final isDark = AppTheme.isDarkContext(context);
 
     return ScaffoldPage(
-      header: PageHeader(
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppTheme.accentPrimary
-                        .withValues(alpha: isDark ? 0.2 : 0.14),
-                    AppTheme.accentPrimary
-                        .withValues(alpha: isDark ? 0.1 : 0.05),
-                  ],
+      header: Consumer<NoticeService>(
+        builder: (context, service, _) => SettingsPageHeader(
+          title: t.noticePageTitle,
+          icon: CustomIcons.FluentIcons.alert_20,
+          // WinUI：刷新/视图切换属于页面级命令，统一放在 CommandBar；
+          // 窄窗口下自动收进溢出菜单，不挤压标题
+          commandBar: CommandBar(
+            mainAxisAlignment: MainAxisAlignment.end,
+            overflowBehavior: CommandBarOverflowBehavior.dynamicOverflow,
+            primaryItems: [
+              CommandBarButton(
+                icon: const Icon(FluentIcons.refresh),
+                label: Text(t.noticeRefresh),
+                onPressed: service.isLoading
+                    ? null
+                    : () => service.fetchNotices(force: true),
+              ),
+              CommandBarButton(
+                icon: Icon(
+                  _useSplitView
+                      ? FluentIcons.grid_view_medium
+                      : FluentIcons.side_panel,
                 ),
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                border: Border.all(
-                  color: AppTheme.accentPrimary
-                      .withValues(alpha: isDark ? 0.3 : 0.18),
-                ),
+                label:
+                    Text(_useSplitView ? t.noticeViewCards : t.noticeViewSplit),
+                onPressed: () {
+                  setState(() => _useSplitView = !_useSplitView);
+                  context
+                      .read<ClientConfigService>()
+                      .setNoticeUseSplitView(_useSplitView);
+                },
               ),
-              child: Icon(
-                CustomIcons.FluentIcons.alert_20,
-                size: 18,
-                color: isDark ? AppTheme.accentLight : AppTheme.accentPrimary,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Flexible(
-              child: Text(
-                t.noticePageTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-        commandBar: CommandBar(
-          mainAxisAlignment: MainAxisAlignment.end,
-          primaryItems: [
-            CommandBarButton(
-              icon: Icon(
-                _useSplitView ? FluentIcons.list : FluentIcons.stop_solid,
-              ),
-              label: Text(_useSplitView ? '切换到卡片视图' : '切换到分栏视图'),
-              onPressed: () {
-                setState(() {
-                  _useSplitView = !_useSplitView;
-                });
-                context
-                    .read<ClientConfigService>()
-                    .setNoticeUseSplitView(_useSplitView);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       content: Consumer<NoticeService>(
@@ -277,245 +412,262 @@ class _NoticePageState extends State<NoticePage> {
           }
 
           final notices = service.activeNotices;
+          if (notices.isEmpty) return _buildEmptyState();
 
-          if (notices.isEmpty) {
-            return _buildEmptyState();
-          }
-
-          if (_useSplitView) {
-            return _buildSplitViewPane(notices, service);
-          } else {
-            return _buildFlowCardsPane(notices, service);
-          }
+          return AnimatedSwitcher(
+            duration: AppTheme.motionNormal,
+            switchInCurve: AppTheme.motionStandard,
+            switchOutCurve: AppTheme.motionAccelerate,
+            // 默认布局是 Stack.loose + 居中：内容不满一屏时会被垂直居中，
+            // 页头下面凭空多出一大截空白。改成撑满 + 左上对齐。
+            layoutBuilder: fillingSwitcherLayout,
+            child: _useSplitView
+                ? _buildSplitViewPane(notices, service)
+                : _buildFlowCardsPane(notices, service),
+          );
         },
       ),
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 分栏视图
+  // --------------------------------------------------------------------------
+
   Widget _buildSplitViewPane(List<Notice> notices, NoticeService service) {
+    final selected = _selectedNotice(notices);
+
     return Padding(
+      key: const ValueKey('split'),
       padding: const EdgeInsets.fromLTRB(20, 0, 24, 24),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 左侧主列表 (Master)
-          Expanded(
-            flex: _selectedNotice == null ? 1 : 4,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildSyncInfo(service),
-                ),
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppTheme.cardBackground(
-                          darkAlpha: 0.4, lightAlpha: 0.6),
-                      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                      border: Border.all(
-                        color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    child: SmoothListView.builder(
-                      config: SmoothScrollConfig.fast,
-                      padding: const EdgeInsets.all(8),
-                      itemCount: notices.length,
-                      itemBuilder: (context, index) {
-                        final notice = notices[index];
-                        final isSelected = _selectedNotice?.id == notice.id;
-                        return StaggeredEntrance(
-                          index: index,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _NoticeListTile(
-                              notice: notice,
-                              isSelected: isSelected,
-                              onTap: () {
-                                setState(() => _selectedNotice = notice);
-                              },
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_selectedNotice != null) ...[
-            const SizedBox(width: 24),
-            // 右侧内容区 (Detail)
-            Expanded(
-              flex: 7,
-              child: Container(
-                margin: const EdgeInsets.only(top: 26),
-                decoration: BoxDecoration(
-                  color:
-                      AppTheme.cardBackground(darkAlpha: 0.6, lightAlpha: 0.8),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-                  border: Border.all(
-                    color: AppTheme.borderSubtle.withValues(alpha: 0.8),
-                  ),
-                  boxShadow: AppTheme.shadowSm,
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  transitionBuilder: (Widget child, Animation<double> animation) {
-                    return FadeTransition(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 窄窗口下退化为“列表 → 详情”单栏切换，避免两栏都被挤扁
+          if (constraints.maxWidth < 720) {
+            return selected == null
+                ? _buildMasterList(notices, service)
+                : _buildDetailCard(selected);
+          }
+
+          // WinUI 双栏：列表栏宽度按比例取值并夹在 280~420 之间，
+          // 保证行内的等级磁贴 / 标题 / 日期永远有足够空间
+          final masterWidth = (constraints.maxWidth * 0.34).clamp(280.0, 420.0);
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: masterWidth,
+                child: _buildMasterList(notices, service),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 28),
+                  child: AnimatedSwitcher(
+                    duration: AppTheme.motionNormal,
+                    switchInCurve: AppTheme.motionStandard,
+                    switchOutCurve: AppTheme.motionAccelerate,
+                    layoutBuilder: fillingSwitcherLayout,
+                    transitionBuilder: (child, animation) => FadeTransition(
                       opacity: animation,
                       child: SlideTransition(
                         position: Tween<Offset>(
                           begin: const Offset(0.02, 0),
                           end: Offset.zero,
-                        ).animate(CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutCubic,
-                        )),
+                        ).animate(animation),
                         child: child,
                       ),
-                    );
-                  },
-                  child: _NoticeDetailPane(
-                    key: ValueKey(_selectedNotice!.id),
-                    notice: _selectedNotice!,
-                    onLinkTap: _launchUrl,
-                    onClose: () => setState(() => _selectedNotice = null),
+                    ),
+                    child: selected == null
+                        ? _buildDetailPlaceholder()
+                        : _buildDetailCard(selected),
                   ),
                 ),
               ),
-            ),
-          ],
-        ],
+            ],
+          );
+        },
       ),
     );
   }
 
+  Widget _buildMasterList(List<Notice> notices, NoticeService service) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+          child: _buildSyncInfo(service, notices.length),
+        ),
+        Expanded(
+          child: ScrollEdgeFade(
+            topExtent: 20,
+            bottomExtent: 20,
+            child: SmoothListView.builder(
+              config: SmoothScrollConfig.fast,
+              padding: const EdgeInsets.only(right: 4, bottom: 8),
+              itemCount: notices.length,
+              itemBuilder: (context, index) {
+                final notice = notices[index];
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: _NoticeListTile(
+                    notice: notice,
+                    isSelected: _selectedNoticeId == notice.id,
+                    onTap: () => setState(() => _selectedNoticeId = notice.id),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailPlaceholder() {
+    return Container(
+      key: const ValueKey('detail-placeholder'),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: AppTheme.borderDefault),
+      ),
+      child: _NoticePlaceholder(
+        icon: FluentIcons.reading_mode,
+        title: t.noticeSelectPromptTitle,
+        description: t.noticeSelectPromptSubtitle,
+      ),
+    );
+  }
+
+  Widget _buildDetailCard(Notice notice) {
+    return Container(
+      key: ValueKey('detail-${notice.id}'),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: AppTheme.borderDefault),
+        boxShadow: AppTheme.shadowSm,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: _NoticeDetailPane(
+        notice: notice,
+        onLinkTap: _launchUrl,
+        onClose: () => setState(() => _selectedNoticeId = null),
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // 卡片视图
+  // --------------------------------------------------------------------------
+
   Widget _buildFlowCardsPane(List<Notice> notices, NoticeService service) {
-    return SmoothSingleChildScrollView(
-      config: SmoothScrollConfig.fast,
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSyncInfo(service),
-          const SizedBox(height: 16),
-          ...notices.asMap().entries.map((entry) {
-            final index = entry.key;
-            final notice = entry.value;
-            return StaggeredEntrance(
-              index: index,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: _ModernNoticeCard(
+    return ScrollEdgeFade(
+      key: const ValueKey('cards'),
+      child: SmoothSingleChildScrollView(
+        config: SmoothScrollConfig.fast,
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildSyncInfo(service, notices.length),
+            ),
+            ...notices.map(
+              (notice) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _NoticeExpanderCard(
+                  key: ValueKey(notice.id),
                   notice: notice,
                   onLinkTap: _launchUrl,
                 ),
               ),
-            );
-          }),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSyncInfo(NoticeService service) {
-    if (service.lastFetchTime == null) return const SizedBox.shrink();
+  // --------------------------------------------------------------------------
+  // 状态区
+  // --------------------------------------------------------------------------
 
-    final elapsed = DateTime.now().difference(service.lastFetchTime!);
-    String timeAgo;
-    if (elapsed.inMinutes < 1) {
-      timeAgo = t.noticeJustNow;
-    } else if (elapsed.inMinutes < 60) {
-      timeAgo = t.noticeMinutesAgo(elapsed.inMinutes);
-    } else if (elapsed.inHours < 24) {
-      timeAgo = t.noticeHoursAgo(elapsed.inHours);
-    } else {
-      timeAgo = t.noticeDaysAgo(elapsed.inDays);
+  Widget _buildSyncInfo(NoticeService service, int count) {
+    final parts = <String>[t.noticeListHeader(count)];
+
+    if (service.lastFetchTime != null) {
+      final elapsed = DateTime.now().difference(service.lastFetchTime!);
+      final String timeAgo;
+      if (elapsed.inMinutes < 1) {
+        timeAgo = t.noticeJustNow;
+      } else if (elapsed.inMinutes < 60) {
+        timeAgo = t.noticeMinutesAgo(elapsed.inMinutes);
+      } else if (elapsed.inHours < 24) {
+        timeAgo = t.noticeHoursAgo(elapsed.inHours);
+      } else {
+        timeAgo = t.noticeDaysAgo(elapsed.inDays);
+      }
+      parts.add(t.noticeLastSynced(timeAgo));
     }
 
     return Row(
       children: [
-        Icon(FluentIcons.sync, size: 12, color: AppTheme.textTertiary),
-        const SizedBox(width: 6),
-        Text(
-          t.noticeLastSynced(timeAgo),
-          style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+        Expanded(
+          child: Text(
+            parts.join('  ·  '),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
+          ),
         ),
-        const Spacer(),
         if (service.isLoading)
           const SizedBox(
             width: 14,
             height: 14,
             child: ProgressRing(strokeWidth: 2),
           ),
-        if (!service.isLoading)
-          IconButton(
-            icon: Icon(FluentIcons.refresh,
-                size: 14, color: AppTheme.textTertiary),
-            onPressed: () => service.fetchNotices(force: true),
-          ),
       ],
     );
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: StaggeredEntrance(
-        index: 0,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(CustomIcons.FluentIcons.getIcon('alert_off_20'),
-              size: 48, color: AppTheme.textTertiary),
-          const SizedBox(height: 16),
-          Text(
-            t.noticeEmpty,
-            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: () =>
-                context.read<NoticeService>().fetchNotices(force: true),
-            child: Text(t.noticeRefresh),
-          ),
-        ],
-      ),
+    return _NoticePlaceholder(
+      icon: CustomIcons.FluentIcons.getIcon('alert_off_20'),
+      title: t.noticeEmpty,
+      description: t.noticeEmptySubtitle,
+      action: Button(
+        onPressed: () =>
+            context.read<NoticeService>().fetchNotices(force: true),
+        child: Text(t.noticeRefresh),
       ),
     );
   }
 
   Widget _buildErrorState(NoticeService service) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(FluentIcons.error, size: 48, color: AppTheme.statusError),
-          const SizedBox(height: 16),
-          Text(
-            t.noticeLoadError,
-            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            service.error ?? '',
-            style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: () => service.fetchNotices(force: true),
-            child: Text(t.noticeRetry),
-          ),
-        ],
+    return _NoticePlaceholder(
+      icon: FluentIcons.error,
+      iconColor: AppTheme.statusError,
+      title: t.noticeLoadError,
+      description: service.error,
+      action: FilledButton(
+        onPressed: () => service.fetchNotices(force: true),
+        child: Text(t.noticeRetry),
       ),
     );
   }
 }
 
+// ============================================================================
+// 列表行
+// ============================================================================
+
+/// WinUI 3 ListViewItem：subtle hover/press（铺满整行），
+/// 选中 = subtle 填充 + 左侧 3×16 accent 指示条。
 class _NoticeListTile extends StatelessWidget {
   final Notice notice;
   final bool isSelected;
@@ -527,277 +679,92 @@ class _NoticeListTile extends StatelessWidget {
     required this.onTap,
   });
 
-  Color _levelColor(NoticeLevel level) {
-    switch (level) {
-      case NoticeLevel.info:
-        return AppTheme.statusInfo;
-      case NoticeLevel.success:
-        return AppTheme.statusSuccess;
-      case NoticeLevel.warning:
-        return AppTheme.statusWarning;
-      case NoticeLevel.critical:
-        return AppTheme.statusError;
-    }
-  }
-
-  IconData _levelIcon(NoticeLevel level) {
-    switch (level) {
-      case NoticeLevel.info:
-        return FluentIcons.info;
-      case NoticeLevel.success:
-        return FluentIcons.completed;
-      case NoticeLevel.warning:
-        return FluentIcons.warning;
-      case NoticeLevel.critical:
-        return FluentIcons.error_badge;
-    }
-  }
-
-  String _formatDate(DateTime dt) {
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final levelColor = _levelColor(notice.level);
-    final isDark = AppTheme.isDarkContext(context);
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
 
-    return AnimatedPressable(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? AppTheme.accentPrimary.withValues(alpha: isDark ? 0.15 : 0.08)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: isSelected
-                  ? AppTheme.accentPrimary.withValues(alpha: isDark ? 0.4 : 0.2)
-                  : Colors.transparent,
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: levelColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-                  border: Border.all(
-                    color: levelColor.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Icon(
-                  _levelIcon(notice.level),
-                  size: 14,
-                  color: levelColor,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        if (notice.pinned) ...[
-                          Icon(FluentIcons.pin,
-                              size: 10, color: AppTheme.accentPrimary),
-                          const SizedBox(width: 4),
-                        ],
-                        Expanded(
-                          child: Text(
-                            notice.title,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                              color: isSelected
-                                  ? AppTheme.textPrimary
-                                  : AppTheme.textSecondary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    if (notice.summary != null && notice.summary!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          notice.summary!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.textTertiary,
-                            height: 1.4,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        _formatDate(notice.publishedAt ?? notice.createdAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppTheme.textTertiary.withValues(alpha: 0.7),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-  }
-}
-
-class _NoticeDetailPane extends StatelessWidget {
-  final Notice notice;
-  final Future<void> Function(String url) onLinkTap;
-  final VoidCallback? onClose;
-
-  const _NoticeDetailPane({
-    super.key,
-    required this.notice,
-    required this.onLinkTap,
-    this.onClose,
-  });
-
-  String _formatDate(DateTime dt) {
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = AppTheme.isDarkContext(context);
-    final t = AppLocalizations.of(context)!;
-
-    return SmoothSingleChildScrollView(
-      config: SmoothScrollConfig.fast,
-      padding: const EdgeInsets.all(32),
-      child: Column(
+    return FluentInteractiveSurface(
+      onPressed: onTap,
+      colors: isSelected
+          ? FluentInteractionColors(
+              rest: AppTheme.subtleFillHover,
+              hovered: AppTheme.surfaceCardHover,
+              pressed: AppTheme.subtleFillPressed,
+            )
+          : FluentInteractionColors.subtle(),
+      padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+      constraints: const BoxConstraints(minHeight: 64),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          // 选中指示条
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: AnimatedContainer(
+              duration: AppTheme.motionFast,
+              curve: AppTheme.motionStandard,
+              width: 3,
+              height: isSelected ? 16 : 0,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(width: 9),
+          _NoticeLevelTile(level: notice.level, size: 26),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    if (notice.pinned)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accentPrimary
-                              .withValues(alpha: isDark ? 0.2 : 0.1),
-                          borderRadius:
-                              BorderRadius.circular(AppTheme.radiusSm),
-                          border: Border.all(
-                            color: AppTheme.accentPrimary
-                                .withValues(alpha: isDark ? 0.4 : 0.2),
-                          ),
+                    Expanded(
+                      child: Text(
+                        notice.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: AppTheme.textPrimary,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(FluentIcons.pin,
-                                size: 10,
-                                color: isDark
-                                    ? AppTheme.accentLight
-                                    : AppTheme.accentPrimary),
-                            const SizedBox(width: 6),
-                            Text(
-                              t.noticePinned,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? AppTheme.accentLight
-                                    : AppTheme.accentPrimary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    Text(
-                      notice.title,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.textPrimary,
-                        height: 1.2,
                       ),
                     ),
+                    if (notice.pinned) ...[
+                      const SizedBox(width: 8),
+                      Icon(FluentIcons.pin, size: 10, color: accent),
+                    ],
                   ],
                 ),
-              ),
-              if (onClose != null) ...[
-                const SizedBox(width: 16),
-                IconButton(
-                  icon: const Icon(FluentIcons.cancel, size: 14),
-                  onPressed: onClose,
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 16,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(FluentIcons.clock,
-                      size: 12, color: AppTheme.textTertiary),
-                  const SizedBox(width: 6),
+                if (notice.summary != null && notice.summary!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
                   Text(
-                    _formatDate(notice.publishedAt ?? notice.createdAt),
+                    notice.summary!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
+                      height: 1.4,
                       color: AppTheme.textTertiary,
                     ),
                   ),
                 ],
-              ),
-              if (notice.link != null && notice.link!.url != null)
-                FilledButton(
-                  onPressed: () => onLinkTap(notice.link!.url!),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(FluentIcons.globe, size: 14),
-                      const SizedBox(width: 8),
-                      Text(notice.link?.label ?? t.noticeOpenLink),
-                    ],
+                const SizedBox(height: 6),
+                Text(
+                  _noticeFormatDate(notice.publishedAt ?? notice.createdAt),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textDisabled,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Container(
-            height: 1,
-            color: AppTheme.borderSubtle.withValues(alpha: 0.6),
-            margin: const EdgeInsets.only(bottom: 24),
-          ),
-          _buildNoticeMarkdown(
-            context,
-            content: notice.content ?? '',
-            compact: false,
-            onLinkTap: onLinkTap,
+              ],
+            ),
           ),
         ],
       ),
@@ -805,239 +772,288 @@ class _NoticeDetailPane extends StatelessWidget {
   }
 }
 
-class _ModernNoticeCard extends StatefulWidget {
+// ============================================================================
+// 详情面板
+// ============================================================================
+
+class _NoticeDetailPane extends StatelessWidget {
   final Notice notice;
   final Future<void> Function(String url) onLinkTap;
+  final VoidCallback? onClose;
 
-  const _ModernNoticeCard({required this.notice, required this.onLinkTap});
-
-  @override
-  State<_ModernNoticeCard> createState() => _ModernNoticeCardState();
-}
-
-class _ModernNoticeCardState extends State<_ModernNoticeCard> {
-  bool _isExpanded = false;
-  bool _isHovered = false;
-
-  Color _levelColor(NoticeLevel level) {
-    switch (level) {
-      case NoticeLevel.info:
-        return AppTheme.statusInfo;
-      case NoticeLevel.success:
-        return AppTheme.statusSuccess;
-      case NoticeLevel.warning:
-        return AppTheme.statusWarning;
-      case NoticeLevel.critical:
-        return AppTheme.statusError;
-    }
-  }
-
-  IconData _levelIcon(NoticeLevel level) {
-    switch (level) {
-      case NoticeLevel.info:
-        return FluentIcons.info;
-      case NoticeLevel.success:
-        return FluentIcons.completed;
-      case NoticeLevel.warning:
-        return FluentIcons.warning;
-      case NoticeLevel.critical:
-        return FluentIcons.error_badge;
-    }
-  }
-
-  String _formatDate(DateTime dt) {
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
-        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-  }
+  const _NoticeDetailPane({
+    required this.notice,
+    required this.onLinkTap,
+    this.onClose,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final notice = widget.notice;
-    final levelColor = _levelColor(notice.level);
-    final isDark = AppTheme.isDarkContext(context);
     final t = AppLocalizations.of(context)!;
 
-    return AnimatedPressable(
-      onTap: () => setState(() => _isExpanded = !_isExpanded),
-      enableHoverScale: true,
-      hoverScale: 1.01,
-      pressScale: 0.98,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _isHovered = true),
-        onExit: (_) => setState(() => _isHovered = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          decoration: BoxDecoration(
-            color: _isHovered
-                ? AppTheme.cardBackground(darkAlpha: 0.7, lightAlpha: 0.9)
-                : AppTheme.cardBackground(darkAlpha: 0.5, lightAlpha: 0.7),
-            borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-            border: Border.all(
-              color: _isHovered
-                  ? levelColor.withValues(alpha: 0.5)
-                  : AppTheme.borderSubtle,
-              width: _isHovered ? 1.5 : 1.0,
-            ),
-            boxShadow: _isHovered ? AppTheme.shadowSm : null,
-          ),
-          child: Column(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 标题区：等级/置顶徽标 → 标题 → 时间
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 16, 16),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: levelColor.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                        border: Border.all(
-                          color: levelColor.withValues(alpha: 0.3),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        FluentChip(
+                          icon: _noticeLevelIcon(notice.level),
+                          label: _noticeLevelLabel(t, notice.level),
+                          color: _noticeLevelColor(notice.level),
+                          fontSize: 11,
+                          iconSize: 10,
                         ),
-                      ),
-                      child: Icon(
-                        _levelIcon(notice.level),
-                        size: 18,
-                        color: levelColor,
+                        if (notice.pinned)
+                          const _NoticePinnedBadge(fontSize: 11),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      notice.title,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                        height: 1.3,
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              if (notice.pinned) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.accentPrimary
-                                        .withValues(alpha: isDark ? 0.2 : 0.1),
-                                    borderRadius: BorderRadius.circular(
-                                        AppTheme.radiusRound),
-                                    border: Border.all(
-                                      color: AppTheme.accentPrimary.withValues(
-                                          alpha: isDark ? 0.4 : 0.2),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(FluentIcons.pin,
-                                          size: 10,
-                                          color: isDark
-                                              ? AppTheme.accentLight
-                                              : AppTheme.accentPrimary),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        t.noticePinned,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: isDark
-                                              ? AppTheme.accentLight
-                                              : AppTheme.accentPrimary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                              ],
-                              Expanded(
-                                child: Text(
-                                  notice.title,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Icon(
-                                _isExpanded
-                                    ? FluentIcons.chevron_up
-                                    : FluentIcons.chevron_down,
-                                size: 14,
-                                color: AppTheme.textTertiary,
-                              ),
-                            ],
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          FluentIcons.clock,
+                          size: 11,
+                          color: AppTheme.textTertiary,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _noticeFormatDateTime(
+                              notice.publishedAt ?? notice.createdAt),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textTertiary,
                           ),
-                          if (notice.summary != null &&
-                              notice.summary!.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              notice.summary!,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: AppTheme.textSecondary,
-                                height: 1.4,
-                              ),
-                              maxLines: _isExpanded ? null : 2,
-                              overflow:
-                                  _isExpanded ? null : TextOverflow.ellipsis,
-                            ),
-                          ],
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Icon(FluentIcons.clock,
-                                  size: 11, color: AppTheme.textTertiary),
-                              const SizedBox(width: 4),
-                              Text(
-                                _formatDate(
-                                    notice.publishedAt ?? notice.createdAt),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppTheme.textTertiary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              AnimatedCrossFade(
-                firstChild: const SizedBox(width: double.infinity, height: 0),
-                secondChild: notice.content != null
-                    ? _buildExpandedContent(notice, isDark, t)
-                    : const SizedBox(width: double.infinity, height: 0),
-                crossFadeState: _isExpanded
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                duration: const Duration(milliseconds: 300),
-                sizeCurve: Curves.easeOutCubic,
-              ),
+              if (onClose != null) ...[
+                const SizedBox(width: 12),
+                FluentIconButton(
+                  icon: CustomIcons.FluentIcons.chrome_close,
+                  tooltip: t.noticeCloseDetail,
+                  iconSize: 14,
+                  onPressed: onClose,
+                ),
+              ],
             ],
           ),
         ),
+        Container(height: 1, color: AppTheme.borderSubtle),
+        // 正文
+        Expanded(
+          child: ScrollEdgeFade(
+            topExtent: 18,
+            bottomExtent: 18,
+            child: SmoothSingleChildScrollView(
+              config: SmoothScrollConfig.fast,
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
+              child: _buildNoticeMarkdown(
+                context,
+                content: notice.content ?? '',
+                compact: false,
+                onLinkTap: onLinkTap,
+              ),
+            ),
+          ),
+        ),
+        // 底部命令区
+        if (notice.link != null && notice.link!.url != null) ...[
+          Container(height: 1, color: AppTheme.borderSubtle),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
+            child: Row(
+              children: [
+                FilledButton(
+                  onPressed: () => onLinkTap(notice.link!.url!),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(FluentIcons.globe, size: 14),
+                      const SizedBox(width: 8),
+                      Text(notice.link?.label ?? t.noticeOpenLink),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// 卡片视图（Expander）
+// ============================================================================
+
+/// WinUI 3 `Expander`：header 最小高度 64、整块可点且高亮铺满，
+/// chevron 为旋转指示；展开区使用二级卡面 + 顶部分隔线。
+class _NoticeExpanderCard extends StatefulWidget {
+  final Notice notice;
+  final Future<void> Function(String url) onLinkTap;
+
+  const _NoticeExpanderCard({
+    super.key,
+    required this.notice,
+    required this.onLinkTap,
+  });
+
+  @override
+  State<_NoticeExpanderCard> createState() => _NoticeExpanderCardState();
+}
+
+class _NoticeExpanderCardState extends State<_NoticeExpanderCard> {
+  bool _isExpanded = false;
+
+  void _toggle() => setState(() => _isExpanded = !_isExpanded);
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = widget.notice;
+    final t = AppLocalizations.of(context)!;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderDefault),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FluentInteractiveSurface(
+            onPressed: _toggle,
+            colors: FluentInteractionColors.subtle(),
+            borderRadius: BorderRadius.zero,
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+            constraints: const BoxConstraints(minHeight: 64),
+            child: Row(
+              children: [
+                _NoticeLevelTile(level: notice.level, size: 30),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              notice.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                          ),
+                          if (notice.pinned) ...[
+                            const SizedBox(width: 8),
+                            const _NoticePinnedBadge(),
+                          ],
+                        ],
+                      ),
+                      if (notice.summary != null &&
+                          notice.summary!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          notice.summary!,
+                          maxLines: _isExpanded ? 3 : 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            height: 1.4,
+                            color: AppTheme.textTertiary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  _noticeFormatDate(notice.publishedAt ?? notice.createdAt),
+                  style: TextStyle(fontSize: 11, color: AppTheme.textDisabled),
+                ),
+                const SizedBox(width: 8),
+                // chevron 交给外层整行处理点击，这里只做旋转指示
+                FluentExpanderChevron(expanded: _isExpanded, size: 28),
+              ],
+            ),
+          ),
+          AnimatedCrossFade(
+            firstChild: const SizedBox(width: double.infinity, height: 0),
+            secondChild: _buildExpandedContent(notice, t),
+            crossFadeState: _isExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            duration: AppTheme.motionNormal,
+            sizeCurve: AppTheme.motionStandard,
+            firstCurve: AppTheme.motionAccelerate,
+            secondCurve: AppTheme.motionStandard,
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildExpandedContent(Notice notice, bool isDark, AppLocalizations t) {
+  Widget _buildExpandedContent(Notice notice, AppLocalizations t) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(76, 0, 20, 24),
+      decoration: BoxDecoration(
+        color: AppTheme.subtleFillHover,
+        border: Border(top: BorderSide(color: AppTheme.borderSubtle)),
+      ),
+      padding: const EdgeInsets.fromLTRB(60, 14, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            height: 1,
-            color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-            margin: const EdgeInsets.only(bottom: 16),
+          Row(
+            children: [
+              FluentChip(
+                icon: _noticeLevelIcon(notice.level),
+                label: _noticeLevelLabel(t, notice.level),
+                color: _noticeLevelColor(notice.level),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _noticeFormatDateTime(notice.publishedAt ?? notice.createdAt),
+                style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
+              ),
+            ],
           ),
+          const SizedBox(height: 12),
           _buildNoticeMarkdown(
             context,
             content: notice.content ?? '',
@@ -1045,13 +1061,13 @@ class _ModernNoticeCardState extends State<_ModernNoticeCard> {
             onLinkTap: widget.onLinkTap,
           ),
           if (notice.link != null && notice.link!.url != null) ...[
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             FilledButton(
               onPressed: () => widget.onLinkTap(notice.link!.url!),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(FluentIcons.globe, size: 14),
+                  const Icon(FluentIcons.globe, size: 14),
                   const SizedBox(width: 8),
                   Text(notice.link?.label ?? t.noticeOpenLink),
                 ],

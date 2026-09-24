@@ -37,6 +37,8 @@ class AppThemePalette {
     required this.surfaceCard,
     required this.surfaceCardHover,
     required this.surfaceCardPressed,
+    required this.subtleFillHover,
+    required this.subtleFillPressed,
     required this.borderSubtle,
     required this.borderDefault,
     required this.borderStrong,
@@ -60,6 +62,12 @@ class AppThemePalette {
   final Color surfaceCard;
   final Color surfaceCardHover;
   final Color surfaceCardPressed;
+
+  /// WinUI `SubtleFillColorSecondary`：透明底控件（subtle button / 列表行）的悬停填充
+  final Color subtleFillHover;
+
+  /// WinUI `SubtleFillColorTertiary`：透明底控件的按下填充（比悬停更弱）
+  final Color subtleFillPressed;
   final Color borderSubtle;
   final Color borderDefault;
   final Color borderStrong;
@@ -92,6 +100,8 @@ class AppThemePalette {
       surfaceCardHover: color(begin.surfaceCardHover, end.surfaceCardHover),
       surfaceCardPressed:
           color(begin.surfaceCardPressed, end.surfaceCardPressed),
+      subtleFillHover: color(begin.subtleFillHover, end.subtleFillHover),
+      subtleFillPressed: color(begin.subtleFillPressed, end.subtleFillPressed),
       borderSubtle: color(begin.borderSubtle, end.borderSubtle),
       borderDefault: color(begin.borderDefault, end.borderDefault),
       borderStrong: color(begin.borderStrong, end.borderStrong),
@@ -133,6 +143,8 @@ class AppTheme {
     surfaceCard: Color(0x0DFFFFFF),
     surfaceCardHover: Color(0x12FFFFFF),
     surfaceCardPressed: Color(0x08FFFFFF),
+    subtleFillHover: Color(0x0FFFFFFF),
+    subtleFillPressed: Color(0x0AFFFFFF),
     borderSubtle: Color(0x0FFFFFFF),
     borderDefault: Color(0x12FFFFFF),
     borderStrong: Color(0x1AFFFFFF),
@@ -157,6 +169,8 @@ class AppTheme {
     surfaceCard: Color(0xFF2B2B2B),
     surfaceCardHover: Color(0xFF323232),
     surfaceCardPressed: Color(0xFF3B3B3B),
+    subtleFillHover: Color(0x14FFFFFF),
+    subtleFillPressed: Color(0x0AFFFFFF),
     borderSubtle: Color(0xFF3A3A3A),
     borderDefault: Color(0xFF4A4A4A),
     borderStrong: Color(0xFF5A5A5A),
@@ -181,6 +195,8 @@ class AppTheme {
     surfaceCard: Color(0xB3FFFFFF),
     surfaceCardHover: Color(0x80FFFFFF),
     surfaceCardPressed: Color(0x4DFFFFFF),
+    subtleFillHover: Color(0x0A000000),
+    subtleFillPressed: Color(0x06000000),
     borderSubtle: Color(0x0F000000),
     borderDefault: Color(0x1A000000),
     borderStrong: Color(0x29000000),
@@ -208,11 +224,22 @@ class AppTheme {
   static const double spacingXxl = 24.0;
 
   // ============ 圆角系统 ============
+  // WinUI 3 双圆角体系：控件 4（ControlCornerRadius）、卡片/浮层 8（OverlayCornerRadius）
   static const double radiusSm = 4.0;
-  static const double radiusMd = 6.0;
+  static const double radiusMd = 4.0;
   static const double radiusLg = 8.0;
   static const double radiusXl = 8.0;
   static const double radiusRound = 999.0;
+
+  // ============ 动效系统 ============
+  // WinUI 3 动效：按下即时反馈（~83ms）、悬停/状态切换 150ms、展开折叠 250ms，
+  // 统一使用 Fluent 标准缓动曲线（KeySpline 0.1, 0.9, 0.2, 1.0）
+  static const Duration motionPress = Duration(milliseconds: 83);
+  static const Duration motionFast = Duration(milliseconds: 150);
+  static const Duration motionNormal = Duration(milliseconds: 250);
+  static const Duration motionSlow = Duration(milliseconds: 350);
+  static const Curve motionStandard = Cubic(0.1, 0.9, 0.2, 1.0);
+  static const Curve motionAccelerate = Cubic(0.7, 0.0, 1.0, 0.5);
 
   static bool get classicControlVisuals => _classicControlVisuals;
 
@@ -362,6 +389,8 @@ class AppTheme {
   static Color get surfaceCard => _activePalette.surfaceCard;
   static Color get surfaceCardHover => _activePalette.surfaceCardHover;
   static Color get surfaceCardPressed => _activePalette.surfaceCardPressed;
+  static Color get subtleFillHover => _activePalette.subtleFillHover;
+  static Color get subtleFillPressed => _activePalette.subtleFillPressed;
   static Color get borderSubtle => _activePalette.borderSubtle;
   static Color get borderDefault => _activePalette.borderDefault;
   static Color get borderStrong => _activePalette.borderStrong;
@@ -556,15 +585,14 @@ class AppTheme {
         ),
       ),
       dialogTheme: ContentDialogThemeData(
+        // WinUI 3 ContentDialog：圆角 8、内边距 24、大阴影
         decoration: BoxDecoration(
           color: colors.bgLayer1,
           borderRadius: BorderRadius.circular(radiusLg),
           border: Border.all(color: colors.borderSubtle),
-          boxShadow: colors.brightness == Brightness.dark
-              ? _shadowLg(colors)
-              : _shadowMd(colors),
+          boxShadow: _shadowLg(colors),
         ),
-        padding: const EdgeInsets.all(spacingXl),
+        padding: const EdgeInsets.all(spacingXxl),
       ),
       infoBarTheme: InfoBarThemeData(
         decoration: (severity) => BoxDecoration(

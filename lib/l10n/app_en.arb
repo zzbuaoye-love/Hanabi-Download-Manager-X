@@ -699,6 +699,33 @@
     "x-auto-source-zh": "检测到旧版本的自启动注册，已自动更新为当前版本",
     "x-auto-synced-at": "2026-04-17T16:57:46.639595"
   },
+  "settingsSectionBackgroundPower": "Background and footprint",
+  "@settingsSectionBackgroundPower": {
+    "x-auto-source-zh": "后台与占用"
+  },
+  "settingsUltraLiteTitle": "Ultra lite mode",
+  "@settingsUltraLiteTitle": {
+    "x-auto-source-zh": "极致精简模式"
+  },
+  "settingsUltraLiteSubtitle": "Automatically drop into an ultra-low-footprint state once the window has stayed in the background for a while: UI refreshes, animations, and statistics sampling pause, while downloads and browser capture keep running. Everything returns to full speed the moment you open the window again.",
+  "@settingsUltraLiteSubtitle": {
+    "x-auto-source-zh": "窗口长时间留在后台后自动进入超低占用状态：暂停界面刷新、动画与统计采样，只保留下载与浏览器接管等核心业务。重新打开窗口时立即恢复全速。"
+  },
+  "settingsUltraLiteIdleTitle": "Idle time before ultra lite mode",
+  "@settingsUltraLiteIdleTitle": {
+    "x-auto-source-zh": "进入精简模式的等待时间"
+  },
+  "settingsUltraLiteIdleSubtitle": "How long the window must stay hidden in the tray or minimized, without being reopened, before ultra lite mode kicks in",
+  "@settingsUltraLiteIdleSubtitle": {
+    "x-auto-source-zh": "窗口隐藏到托盘或最小化后，超过这段时间没有被重新拉起就进入极致精简模式"
+  },
+  "settingsUltraLiteIdleMinutesLabel": "{minutes} min",
+  "@settingsUltraLiteIdleMinutesLabel": {
+    "placeholders": {
+      "minutes": {}
+    },
+    "x-auto-source-zh": "{minutes} 分钟"
+  },
   "settingsSectionBehavior": "Behavior settings",
   "@settingsSectionBehavior": {
     "x-auto-source-zh": "行为设置",
@@ -1227,6 +1254,190 @@
   "@settingsDownloadCardHttpBadgeSubtitle": {
     "x-auto-source-zh": "在每个下载卡片显示 HTTP 版本和目标连通性",
     "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoBadgeTitle": "IP geolocation badge",
+  "@settingsGeoBadgeTitle": {
+    "x-auto-source-zh": "IP 归属地徽标",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoBadgeSubtitle": "Show an egress-country → target-country flag badge on download cards",
+  "@settingsGeoBadgeSubtitle": {
+    "x-auto-source-zh": "在下载卡片上显示 出口国 → 目标服务器国 的国旗徽标",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoSourceTitle": "Geolocation data source",
+  "@settingsGeoSourceTitle": {
+    "x-auto-source-zh": "归属地数据源",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoSourceSubtitle": "The online interface works out of the box; the offline library only uses the local database and system DNS and does not contact third-party home or public DoH",
+  "@settingsGeoSourceSubtitle": {
+    "x-auto-source-zh": "在线接口即开即用；离线库只用本地数据库和系统 DNS，不联系第三方归属地或公共 DoH",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "settingsGeoSourceOnline": "Online API",
+  "@settingsGeoSourceOnline": {
+    "x-auto-source-zh": "在线接口",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoSourceOffline": "Offline database",
+  "@settingsGeoSourceOffline": {
+    "x-auto-source-zh": "离线数据库",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoPrivacyNotice": "Online mode will send the target IP to the third-party home interface and resolve the domain name through public DoH; offline mode will not and cannot display the export country.",
+  "@settingsGeoPrivacyNotice": {
+    "x-auto-source-zh": "在线模式会把目标 IP 发送给第三方归属地接口，并通过公共 DoH 解析域名；离线模式不会，且无法显示出口国家",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "settingsGeoOfflinePackTitle": "Offline geolocation pack",
+  "@settingsGeoOfflinePackTitle": {
+    "x-auto-source-zh": "离线归属地资源包",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackMissing": "Not installed",
+  "@settingsGeoOfflinePackMissing": {
+    "x-auto-source-zh": "未安装",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackReady": "Installed ({size})",
+  "@settingsGeoOfflinePackReady": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    },
+    "x-auto-source-zh": "已安装（{size}）",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackDownload": "Download pack",
+  "@settingsGeoOfflinePackDownload": {
+    "x-auto-source-zh": "下载资源包",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackDownloading": "Downloading {percent}%",
+  "@settingsGeoOfflinePackDownloading": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    },
+    "x-auto-source-zh": "下载中 {percent}%",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackRemove": "Remove pack",
+  "@settingsGeoOfflinePackRemove": {
+    "x-auto-source-zh": "删除资源包",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackFailed": "Pack download failed: {error}",
+  "@settingsGeoOfflinePackFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    },
+    "x-auto-source-zh": "资源包下载失败：{error}",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "settingsGeoOfflinePackSourceNote": "Data from ip-location-db (CC0 public domain)",
+  "@settingsGeoOfflinePackSourceNote": {
+    "x-auto-source-zh": "数据来自 ip-location-db（CC0 公共领域）",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeLocalEndpoint": "This device / LAN",
+  "@geoBadgeLocalEndpoint": {
+    "x-auto-source-zh": "本机 / 内网"
+  },
+  "settingsGeoAccuracyNoticeTitle": "Egress country accuracy",
+  "@settingsGeoAccuracyNoticeTitle": {
+    "x-auto-source-zh": "出口国的精度限制"
+  },
+  "settingsGeoAccuracyNotice": "With a local rule-based proxy client (Clash / mihomo / sing-box …) the routing rules live inside the client and this app only sees the local listener address, so it cannot tell which rule a given download target actually matched — the same client may send one site through an overseas node and another one direct. The egress country is therefore approximate, and the badge tooltip says so. The target server country is unaffected.",
+  "@settingsGeoAccuracyNotice": {
+    "x-auto-source-zh": "使用 Clash / mihomo / sing-box 等本机规则型代理时，分流规则位于代理客户端内部，本应用只能看到本地监听地址，无法得知某个下载目标实际命中了哪条规则——同一个客户端完全可能让 A 站点走境外节点、B 站点直连。此时徽标显示的出口国为近似值，徽标提示中会明确标注。目标服务器国不受影响。"
+  },
+  "geoBadgeEgressRuleBased": "The proxy is a local rule-based client whose routing rules are opaque; the egress country is approximate",
+  "@geoBadgeEgressRuleBased": {
+    "x-auto-source-zh": "代理为本机规则型客户端，实际分流规则不可见；出口国为近似值"
+  },
+  "settingsGeoPackUrlTitle": "Pack download source",
+  "@settingsGeoPackUrlTitle": {
+    "x-auto-source-zh": "资源包下载源"
+  },
+  "settingsGeoPackUrlSubtitle": "The built-in sources are all hosted outside mainland networks; point this at a mirror or your own host if they are blocked",
+  "@settingsGeoPackUrlSubtitle": {
+    "x-auto-source-zh": "内置源均位于境外；可改为镜像地址或自建源"
+  },
+  "settingsGeoPackUrlPlaceholder": "Leave empty to use the built-in default source",
+  "@settingsGeoPackUrlPlaceholder": {
+    "x-auto-source-zh": "留空则使用内置默认源"
+  },
+  "settingsGeoPackUrlSave": "Save",
+  "@settingsGeoPackUrlSave": {
+    "x-auto-source-zh": "保存"
+  },
+  "settingsGeoPackUrlReset": "Reset to default",
+  "@settingsGeoPackUrlReset": {
+    "x-auto-source-zh": "恢复默认"
+  },
+  "settingsGeoPackUrlInvalid": "Invalid download URL",
+  "@settingsGeoPackUrlInvalid": {
+    "x-auto-source-zh": "下载地址无效"
+  },
+  "settingsGeoPackUrlSaved": "Download source updated",
+  "@settingsGeoPackUrlSaved": {
+    "x-auto-source-zh": "下载源已更新"
+  },
+  "settingsGeoPackPresetLabel": "Built-in sources",
+  "@settingsGeoPackPresetLabel": {
+    "x-auto-source-zh": "内置源"
+  },
+  "settingsGeoPackPresetJsdelivr": "jsDelivr (resumable)",
+  "@settingsGeoPackPresetJsdelivr": {
+    "x-auto-source-zh": "jsDelivr（支持断点续传）"
+  },
+  "settingsGeoPackPresetUnpkg": "unpkg (faster, no resume)",
+  "@settingsGeoPackPresetUnpkg": {
+    "x-auto-source-zh": "unpkg（更快，不支持续传）"
+  },
+  "settingsGeoPackImportTitle": "Import from a local file",
+  "@settingsGeoPackImportTitle": {
+    "x-auto-source-zh": "从本地文件导入"
+  },
+  "settingsGeoPackImportSubtitle": "If the download sources are blocked, fetch the pack yourself and import it here. Accepts ip-location-db and IP2Location LITE CSV files, optionally .gz compressed",
+  "@settingsGeoPackImportSubtitle": {
+    "x-auto-source-zh": "下载源被阻断时，可自行下载资源包后导入；支持 ip-location-db 与 IP2Location LITE 的 CSV，可为 .gz 压缩包"
+  },
+  "settingsGeoPackImportButton": "Choose a file",
+  "@settingsGeoPackImportButton": {
+    "x-auto-source-zh": "选择文件导入"
+  },
+  "settingsGeoPackImportValidating": "Validating…",
+  "@settingsGeoPackImportValidating": {
+    "x-auto-source-zh": "校验中…"
+  },
+  "settingsGeoPackImportSuccess": "Imported ({size})",
+  "@settingsGeoPackImportSuccess": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    },
+    "x-auto-source-zh": "导入成功（{size}）"
+  },
+  "settingsGeoPackImportFailed": "Import failed: {error}",
+  "@settingsGeoPackImportFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    },
+    "x-auto-source-zh": "导入失败：{error}"
+  },
+  "settingsGeoPackImportPickerTitle": "Select an offline geolocation pack",
+  "@settingsGeoPackImportPickerTitle": {
+    "x-auto-source-zh": "选择离线归属地资源包"
   },
   "settingsDefaultUserAgentTitle": "Default User-Agent",
   "@settingsDefaultUserAgentTitle": {
@@ -3934,6 +4145,56 @@
     },
     "x-auto-source-zh": "已识别为 {type}，但当前版本暂不支持直接下载",
     "x-auto-synced-at": "2026-04-25T15:16:49.094588"
+  },
+  "addDownloadSupportedProtocolsLabel": "Supported",
+  "@addDownloadSupportedProtocolsLabel": {
+    "x-auto-source-zh": "当前支持"
+  },
+  "addDownloadProtocolHttp": "HTTP/HTTPS",
+  "@addDownloadProtocolHttp": {
+    "x-auto-source-zh": "HTTP/HTTPS"
+  },
+  "addDownloadProtocolMagnet": "Magnet",
+  "@addDownloadProtocolMagnet": {
+    "x-auto-source-zh": "磁力链接"
+  },
+  "addDownloadProtocolTorrentFile": "Torrent file",
+  "@addDownloadProtocolTorrentFile": {
+    "x-auto-source-zh": "种子文件"
+  },
+  "addDownloadProtocolEd2k": "ED2K",
+  "@addDownloadProtocolEd2k": {
+    "x-auto-source-zh": "ED2K"
+  },
+  "addDownloadProtocolResolver": "Resolver",
+  "@addDownloadProtocolResolver": {
+    "x-auto-source-zh": "解析器"
+  },
+  "addDownloadProtocolBuiltIn": "Built-in support",
+  "@addDownloadProtocolBuiltIn": {
+    "x-auto-source-zh": "内置支持"
+  },
+  "addDownloadProtocolProvidedBy": "Provided by the {provider} plugin",
+  "@addDownloadProtocolProvidedBy": {
+    "placeholders": {
+      "provider": {}
+    },
+    "x-auto-source-zh": "由 {provider} 插件提供"
+  },
+  "addDownloadIntentPluginReady": "Detected {type}. The \"{plugin}\" plugin will handle this download.",
+  "@addDownloadIntentPluginReady": {
+    "placeholders": {
+      "type": {},
+      "plugin": {}
+    },
+    "x-auto-source-zh": "已识别为 {type}，将由「{plugin}」插件处理"
+  },
+  "addDownloadIntentNoPlugin": "Detected {type}, but no enabled plugin supports it. Install or enable one on the Plugins page.",
+  "@addDownloadIntentNoPlugin": {
+    "placeholders": {
+      "type": {}
+    },
+    "x-auto-source-zh": "已识别为 {type}，但没有已启用的插件支持它。请在插件页安装或启用对应插件"
   },
   "addDownloadErrorAddFailed": "Failed to add task: {error}",
   "@addDownloadErrorAddFailed": {
@@ -6868,6 +7129,66 @@
     "x-auto-source-zh": "限并发 x{count}",
     "x-auto-synced-at": "2026-04-17T16:57:46.639595"
   },
+  "geoBadgeResolving": "Locating…",
+  "@geoBadgeResolving": {
+    "x-auto-source-zh": "定位中…",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeUnknownCountry": "Unknown",
+  "@geoBadgeUnknownCountry": {
+    "x-auto-source-zh": "未知",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeFailed": "Lookup failed",
+  "@geoBadgeFailed": {
+    "x-auto-source-zh": "定位失败",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeDisabledHint": "Geo badge is off",
+  "@geoBadgeDisabledHint": {
+    "x-auto-source-zh": "IP 归属地徽标已关闭",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeTooltipEgress": "Egress",
+  "@geoBadgeTooltipEgress": {
+    "x-auto-source-zh": "发起出口",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeTooltipTarget": "Target server",
+  "@geoBadgeTooltipTarget": {
+    "x-auto-source-zh": "目标服务器",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeTooltipVia": "Via proxy",
+  "@geoBadgeTooltipVia": {
+    "x-auto-source-zh": "经代理",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeTooltipDirect": "Direct",
+  "@geoBadgeTooltipDirect": {
+    "x-auto-source-zh": "直连",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeUplink": "Uplink",
+  "@geoBadgeUplink": {
+    "x-auto-source-zh": "上行",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeDownlink": "Downlink",
+  "@geoBadgeDownlink": {
+    "x-auto-source-zh": "下行",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeSourceOnlineTag": "Online",
+  "@geoBadgeSourceOnlineTag": {
+    "x-auto-source-zh": "在线",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "geoBadgeSourceOfflineTag": "Offline DB",
+  "@geoBadgeSourceOfflineTag": {
+    "x-auto-source-zh": "离线库",
+    "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
   "downloadFailureHintAuth": "Login or Referer/Cookie replenishment may be required, and the link may have expired.",
   "@downloadFailureHintAuth": {
     "x-auto-source-zh": "可能需要登录或补充 Referer/Cookie，链接可能已过期。",
@@ -7024,6 +7345,64 @@
   "@noticeOpenLink": {
     "x-auto-source-zh": "打开链接",
     "x-auto-synced-at": "2026-04-17T16:57:46.639595"
+  },
+  "noticeViewCards": "Switch to card view",
+  "@noticeViewCards": {
+    "x-auto-source-zh": "切换到卡片视图",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeViewSplit": "Switch to split view",
+  "@noticeViewSplit": {
+    "x-auto-source-zh": "切换到分栏视图",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeLevelInfo": "Info",
+  "@noticeLevelInfo": {
+    "x-auto-source-zh": "信息",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeLevelSuccess": "Update",
+  "@noticeLevelSuccess": {
+    "x-auto-source-zh": "更新",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeLevelWarning": "Heads-up",
+  "@noticeLevelWarning": {
+    "x-auto-source-zh": "注意",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeLevelCritical": "Important",
+  "@noticeLevelCritical": {
+    "x-auto-source-zh": "重要",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeEmptySubtitle": "Announcements and release notes from Hanabi will show up here",
+  "@noticeEmptySubtitle": {
+    "x-auto-source-zh": "这里会显示来自 Hanabi 的公告与更新说明",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeSelectPromptTitle": "Select a notice",
+  "@noticeSelectPromptTitle": {
+    "x-auto-source-zh": "选择一条通知",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeSelectPromptSubtitle": "Pick a notice from the list to read the full content",
+  "@noticeSelectPromptSubtitle": {
+    "x-auto-source-zh": "从左侧列表中选择通知即可阅读完整内容",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeCloseDetail": "Close details",
+  "@noticeCloseDetail": {
+    "x-auto-source-zh": "关闭详情",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
+  },
+  "noticeListHeader": "{count} notices",
+  "@noticeListHeader": {
+    "placeholders": {
+      "count": {}
+    },
+    "x-auto-source-zh": "共 {count} 条通知",
+    "x-auto-synced-at": "2026-07-27T15:41:43.342880"
   },
   "settingsLogManagementSection": "Log management",
   "@settingsLogManagementSection": {

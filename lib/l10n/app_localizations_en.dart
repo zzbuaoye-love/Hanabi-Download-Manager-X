@@ -454,6 +454,28 @@ class AppLocalizationsEn extends AppLocalizations {
       'An older startup entry was detected and updated to the current version.';
 
   @override
+  String get settingsSectionBackgroundPower => 'Background and footprint';
+
+  @override
+  String get settingsUltraLiteTitle => 'Ultra lite mode';
+
+  @override
+  String get settingsUltraLiteSubtitle =>
+      'Automatically drop into an ultra-low-footprint state once the window has stayed in the background for a while: UI refreshes, animations, and statistics sampling pause, while downloads and browser capture keep running. Everything returns to full speed the moment you open the window again.';
+
+  @override
+  String get settingsUltraLiteIdleTitle => 'Idle time before ultra lite mode';
+
+  @override
+  String get settingsUltraLiteIdleSubtitle =>
+      'How long the window must stay hidden in the tray or minimized, without being reopened, before ultra lite mode kicks in';
+
+  @override
+  String settingsUltraLiteIdleMinutesLabel(Object minutes) {
+    return '$minutes min';
+  }
+
+  @override
   String get settingsSectionBehavior => 'Behavior settings';
 
   @override
@@ -818,6 +840,134 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsDownloadCardHttpBadgeSubtitle =>
       'Show HTTP version and target connectivity on each download card';
+
+  @override
+  String get settingsGeoBadgeTitle => 'IP geolocation badge';
+
+  @override
+  String get settingsGeoBadgeSubtitle =>
+      'Show an egress-country → target-country flag badge on download cards';
+
+  @override
+  String get settingsGeoSourceTitle => 'Geolocation data source';
+
+  @override
+  String get settingsGeoSourceSubtitle =>
+      'The online interface works out of the box; the offline library only uses the local database and system DNS and does not contact third-party home or public DoH';
+
+  @override
+  String get settingsGeoSourceOnline => 'Online API';
+
+  @override
+  String get settingsGeoSourceOffline => 'Offline database';
+
+  @override
+  String get settingsGeoPrivacyNotice =>
+      'Online mode will send the target IP to the third-party home interface and resolve the domain name through public DoH; offline mode will not and cannot display the export country.';
+
+  @override
+  String get settingsGeoOfflinePackTitle => 'Offline geolocation pack';
+
+  @override
+  String get settingsGeoOfflinePackMissing => 'Not installed';
+
+  @override
+  String settingsGeoOfflinePackReady(String size) {
+    return 'Installed ($size)';
+  }
+
+  @override
+  String get settingsGeoOfflinePackDownload => 'Download pack';
+
+  @override
+  String settingsGeoOfflinePackDownloading(int percent) {
+    return 'Downloading $percent%';
+  }
+
+  @override
+  String get settingsGeoOfflinePackRemove => 'Remove pack';
+
+  @override
+  String settingsGeoOfflinePackFailed(String error) {
+    return 'Pack download failed: $error';
+  }
+
+  @override
+  String get settingsGeoOfflinePackSourceNote =>
+      'Data from ip-location-db (CC0 public domain)';
+
+  @override
+  String get geoBadgeLocalEndpoint => 'This device / LAN';
+
+  @override
+  String get settingsGeoAccuracyNoticeTitle => 'Egress country accuracy';
+
+  @override
+  String get settingsGeoAccuracyNotice =>
+      'With a local rule-based proxy client (Clash / mihomo / sing-box …) the routing rules live inside the client and this app only sees the local listener address, so it cannot tell which rule a given download target actually matched — the same client may send one site through an overseas node and another one direct. The egress country is therefore approximate, and the badge tooltip says so. The target server country is unaffected.';
+
+  @override
+  String get geoBadgeEgressRuleBased =>
+      'The proxy is a local rule-based client whose routing rules are opaque; the egress country is approximate';
+
+  @override
+  String get settingsGeoPackUrlTitle => 'Pack download source';
+
+  @override
+  String get settingsGeoPackUrlSubtitle =>
+      'The built-in sources are all hosted outside mainland networks; point this at a mirror or your own host if they are blocked';
+
+  @override
+  String get settingsGeoPackUrlPlaceholder =>
+      'Leave empty to use the built-in default source';
+
+  @override
+  String get settingsGeoPackUrlSave => 'Save';
+
+  @override
+  String get settingsGeoPackUrlReset => 'Reset to default';
+
+  @override
+  String get settingsGeoPackUrlInvalid => 'Invalid download URL';
+
+  @override
+  String get settingsGeoPackUrlSaved => 'Download source updated';
+
+  @override
+  String get settingsGeoPackPresetLabel => 'Built-in sources';
+
+  @override
+  String get settingsGeoPackPresetJsdelivr => 'jsDelivr (resumable)';
+
+  @override
+  String get settingsGeoPackPresetUnpkg => 'unpkg (faster, no resume)';
+
+  @override
+  String get settingsGeoPackImportTitle => 'Import from a local file';
+
+  @override
+  String get settingsGeoPackImportSubtitle =>
+      'If the download sources are blocked, fetch the pack yourself and import it here. Accepts ip-location-db and IP2Location LITE CSV files, optionally .gz compressed';
+
+  @override
+  String get settingsGeoPackImportButton => 'Choose a file';
+
+  @override
+  String get settingsGeoPackImportValidating => 'Validating…';
+
+  @override
+  String settingsGeoPackImportSuccess(String size) {
+    return 'Imported ($size)';
+  }
+
+  @override
+  String settingsGeoPackImportFailed(String error) {
+    return 'Import failed: $error';
+  }
+
+  @override
+  String get settingsGeoPackImportPickerTitle =>
+      'Select an offline geolocation pack';
 
   @override
   String get settingsDefaultUserAgentTitle => 'Default User-Agent';
@@ -2590,6 +2740,42 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String downloadIntentUnsupportedType(Object type) {
     return 'It has been identified as $type, but the current version does not support direct download.';
+  }
+
+  @override
+  String get addDownloadSupportedProtocolsLabel => 'Supported';
+
+  @override
+  String get addDownloadProtocolHttp => 'HTTP/HTTPS';
+
+  @override
+  String get addDownloadProtocolMagnet => 'Magnet';
+
+  @override
+  String get addDownloadProtocolTorrentFile => 'Torrent file';
+
+  @override
+  String get addDownloadProtocolEd2k => 'ED2K';
+
+  @override
+  String get addDownloadProtocolResolver => 'Resolver';
+
+  @override
+  String get addDownloadProtocolBuiltIn => 'Built-in support';
+
+  @override
+  String addDownloadProtocolProvidedBy(Object provider) {
+    return 'Provided by the $provider plugin';
+  }
+
+  @override
+  String addDownloadIntentPluginReady(Object type, Object plugin) {
+    return 'Detected $type. The \"$plugin\" plugin will handle this download.';
+  }
+
+  @override
+  String addDownloadIntentNoPlugin(Object type) {
+    return 'Detected $type, but no enabled plugin supports it. Install or enable one on the Plugins page.';
   }
 
   @override
@@ -4415,6 +4601,42 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get geoBadgeResolving => 'Locating…';
+
+  @override
+  String get geoBadgeUnknownCountry => 'Unknown';
+
+  @override
+  String get geoBadgeFailed => 'Lookup failed';
+
+  @override
+  String get geoBadgeDisabledHint => 'Geo badge is off';
+
+  @override
+  String get geoBadgeTooltipEgress => 'Egress';
+
+  @override
+  String get geoBadgeTooltipTarget => 'Target server';
+
+  @override
+  String get geoBadgeTooltipVia => 'Via proxy';
+
+  @override
+  String get geoBadgeTooltipDirect => 'Direct';
+
+  @override
+  String get geoBadgeUplink => 'Uplink';
+
+  @override
+  String get geoBadgeDownlink => 'Downlink';
+
+  @override
+  String get geoBadgeSourceOnlineTag => 'Online';
+
+  @override
+  String get geoBadgeSourceOfflineTag => 'Offline DB';
+
+  @override
   String get downloadFailureHintAuth =>
       'Login or Referer/Cookie replenishment may be required, and the link may have expired.';
 
@@ -4522,6 +4744,43 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noticeOpenLink => 'Open link';
+
+  @override
+  String get noticeViewCards => 'Switch to card view';
+
+  @override
+  String get noticeViewSplit => 'Switch to split view';
+
+  @override
+  String get noticeLevelInfo => 'Info';
+
+  @override
+  String get noticeLevelSuccess => 'Update';
+
+  @override
+  String get noticeLevelWarning => 'Heads-up';
+
+  @override
+  String get noticeLevelCritical => 'Important';
+
+  @override
+  String get noticeEmptySubtitle =>
+      'Announcements and release notes from Hanabi will show up here';
+
+  @override
+  String get noticeSelectPromptTitle => 'Select a notice';
+
+  @override
+  String get noticeSelectPromptSubtitle =>
+      'Pick a notice from the list to read the full content';
+
+  @override
+  String get noticeCloseDetail => 'Close details';
+
+  @override
+  String noticeListHeader(Object count) {
+    return '$count notices';
+  }
 
   @override
   String get settingsLogManagementSection => 'Log management';

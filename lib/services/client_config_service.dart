@@ -29,6 +29,9 @@ class ClientConfigService extends ChangeNotifier {
   static const int defaultBrowserExtensionPort = 9701;
   static const int minBrowserExtensionPort = 1024;
   static const int maxBrowserExtensionPort = 65535;
+  static const int defaultUltraLiteIdleMinutes = 5;
+  static const int minUltraLiteIdleMinutes = 1;
+  static const int maxUltraLiteIdleMinutes = 180;
   static const String popupWindowEffectFollowMain = 'follow_main';
   static const String popupWindowEffectSolid = 'solid';
   static const String popupWindowEffectBlur = 'blur';
@@ -784,6 +787,18 @@ class ClientConfigService extends ChangeNotifier {
     await _setToConfig(_appConfig, _appConfigPath, key, value);
   }
 
+  /// 通用的 String 配置获取方法
+  String getString(String key, {String defaultValue = ''}) {
+    return _getFromConfig<String>(_appConfig, key,
+            defaultValue: defaultValue) ??
+        defaultValue;
+  }
+
+  /// 通用的 String 配置设置方法
+  Future<void> setString(String key, String value) async {
+    await _setToConfig(_appConfig, _appConfigPath, key, value);
+  }
+
   bool shouldShowOobe() {
     final completedVersion = _getFromConfig<String>(
           _appConfig,
@@ -1050,6 +1065,51 @@ class ClientConfigService extends ChangeNotifier {
   Future<void> setEnableOnlineStats(bool value) async {
     await _setToConfig(
         _appConfig, _appConfigPath, 'behavior.enable_online_stats', value);
+  }
+
+  /// 极致精简模式：窗口长时间待在后台后自动进入的超低功耗档位。
+  bool getUltraLiteModeEnabled() {
+    return _getFromConfig<bool>(
+          _appConfig,
+          'performance.ultra_lite_mode_enabled',
+          defaultValue: true,
+        ) ??
+        true;
+  }
+
+  Future<void> setUltraLiteModeEnabled(bool value) async {
+    await _setToConfig(
+      _appConfig,
+      _appConfigPath,
+      'performance.ultra_lite_mode_enabled',
+      value,
+    );
+  }
+
+  static int normalizeUltraLiteIdleMinutes(dynamic value) {
+    final minutes =
+        value is int ? value : int.tryParse(value?.toString() ?? '');
+    if (minutes == null) return defaultUltraLiteIdleMinutes;
+    return minutes.clamp(minUltraLiteIdleMinutes, maxUltraLiteIdleMinutes);
+  }
+
+  int getUltraLiteIdleMinutes() {
+    return normalizeUltraLiteIdleMinutes(
+      _getFromConfig<dynamic>(
+        _appConfig,
+        'performance.ultra_lite_idle_minutes',
+        defaultValue: defaultUltraLiteIdleMinutes,
+      ),
+    );
+  }
+
+  Future<void> setUltraLiteIdleMinutes(int value) async {
+    await _setToConfig(
+      _appConfig,
+      _appConfigPath,
+      'performance.ultra_lite_idle_minutes',
+      normalizeUltraLiteIdleMinutes(value),
+    );
   }
 
   static bool isValidBrowserExtensionPortValue(int value) {

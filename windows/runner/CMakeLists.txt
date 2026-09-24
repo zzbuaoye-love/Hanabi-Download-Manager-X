@@ -23,6 +23,20 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
+# Treat the runner sources as UTF-8 regardless of the machine's ANSI code page.
+#
+# Without this, MSVC decodes these files using the system code page. On a
+# Chinese-locale machine (CP936) a single non-ASCII character in a comment
+# raises C4819, and because apply_standard_settings() enables /WX that warning
+# is a hard build failure. This project's comments are routinely Chinese, so
+# that failure is a matter of when, not if.
+#
+# Scoped to the runner on purpose: the top-level CMakeLists warns against
+# putting options in apply_standard_settings(), since plugins share it.
+if(MSVC)
+  target_compile_options(${BINARY_NAME} PRIVATE "/utf-8")
+endif()
+
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")

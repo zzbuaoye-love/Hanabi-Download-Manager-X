@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:scroll_animator/scroll_animator.dart';
+import 'services/app_power_mode_service.dart';
 import 'services/integrated_download_service.dart';
 import 'services/kernel/kernel_manager.dart';
 import 'services/kernel/next/downloader/proxy_runtime.dart';
@@ -36,6 +37,7 @@ import 'services/notification_settings_service.dart';
 import 'services/notice_service.dart';
 import 'services/crash_report_service.dart';
 import 'services/download_failure_stats_service.dart';
+import 'services/geo_ip_service.dart';
 import 'services/localization_service.dart';
 import 'services/popup_bridge_service.dart';
 import 'services/main_window_command_service.dart';
@@ -319,6 +321,9 @@ void main(List<String> args) async {
     final localizationService = LocalizationService();
     final pluginLifecycleService = PluginLifecycleService();
     final pluginStoreService = PluginStoreService();
+    // IP 归属地服务依赖 ClientConfigService 读取开关与数据源，
+    // 必须在 clientConfig.initialize() 之后再 initialize()。
+    final geoIpService = GeoIpService(clientConfig);
 
     appLogger.info('App', 'Application starting...');
     await clientConfig.initialize();
@@ -337,6 +342,8 @@ void main(List<String> args) async {
     await notificationSettings.init(); // 初始化通知设置
     await crashReportService.initialize();
     await NsfxProxyRuntime.ensureSystemProxyObserverStarted();
+    // 仅读取配置并探测离线资源包（磁盘 stat），无网络请求，开销可忽略
+    await geoIpService.initialize();
 
     // 初始化 FluentIcons（从 JSON 加载图标映射）
     await FluentIcons.initialize();
@@ -379,10 +386,16 @@ void main(List<String> args) async {
       debugPrint('Failed to load speed history: $e');
     });
 
+    // 功耗调度中枢：开机自启时窗口本来就不显示，直接按后台起步，
+    // 空闲计时器随即开始跑，用户没来拉窗口就会自动落到极致精简模式。
+    final powerModeService = AppPowerModeService();
+    powerModeService.initialize(windowVisible: !isAutoStart);
+
     runApp(
       MultiProvider(
         providers: [
           ChangeNotifierProvider.value(value: kernelManager),
+          ChangeNotifierProvider.value(value: powerModeService),
           ChangeNotifierProvider(
             create: (context) => IntegratedDownloadService(),
           ),
@@ -401,6 +414,7 @@ void main(List<String> args) async {
           ChangeNotifierProvider.value(value: localizationService),
           ChangeNotifierProvider.value(value: pluginLifecycleService),
           ChangeNotifierProvider.value(value: pluginStoreService),
+          ChangeNotifierProvider.value(value: geoIpService),
           Provider<PluginProcessRunner>(create: (_) => PluginProcessRunner()),
           Provider<bool>.value(value: isAutoStart), // 传递启动模式
         ],
@@ -417,7 +431,8 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+class _MyAppState extends State<MyApp>
+    with WidgetsBindingObserver, WindowListener {
   static const MethodChannel _windowChannel =
       MethodChannel('com.hanabi.download/window');
 
@@ -427,8 +442,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   ClientConfigService? _clientConfig;
   NetworkStatusService? _networkStatus;
   NoticeService? _noticeService;
+  final AppPowerModeService _powerMode = AppPowerModeService();
   bool _showClientUi = !Platform.isWindows;
-  bool _isBackgroundMode = false;
   bool _syncingPopupBridge = false;
   bool _oobeDialogShown = false;
   bool _isShuttingDown = false;
@@ -437,10 +452,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    windowManager.addListener(this);
     _windowChannel.setMethodCallHandler(_handleWindowChannelCall);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _runStartupSequence();
     });
+  }
+
+  // 最小化到任务栏和隐藏到托盘一样——窗口不可见，界面开销就该停掉。
+  // 原先只有托盘路径会切后台档，最小化时依旧按前台节奏跑。
+  @override
+  void onWindowMinimize() {
+    _powerMode.setWindowVisible(false);
+  }
+
+  @override
+  void onWindowRestore() {
+    _powerMode.wakeForForeground();
+  }
+
+  @override
+  void onWindowFocus() {
+    _powerMode.wakeForForeground();
   }
 
   @override
@@ -569,18 +602,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         _handleMainWindowVisibilityChanged;
   }
 
+  /// 窗口可见性的唯一汇入点。各服务自己订阅 [AppPowerModeService]，
+  /// 这里不再逐个转发，避免出现两套彼此不同步的后台状态。
   void _handleMainWindowVisibilityChanged(bool isVisible) {
-    _isBackgroundMode = !isVisible;
-    _noticeService?.setBackgroundMode(_isBackgroundMode);
-    _downloadListener?.setBackgroundMode(_isBackgroundMode);
-
-    try {
-      context.read<IntegratedDownloadService>().setBackgroundMode(
-            _isBackgroundMode,
-          );
-    } catch (_) {
-      // The provider is not available during the earliest bootstrap moments.
-    }
+    _powerMode.setWindowVisible(isVisible);
   }
 
   int _trayTaskStatusOrder(DownloadStatus status) {
@@ -884,7 +909,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _initDownloadListener() {
     _downloadListener = DownloadListenerService(context);
     _downloadListener!.startListening();
-    _downloadListener!.setBackgroundMode(_isBackgroundMode);
 
     // 注意：在线统计功能已移至网页端
     // 访问 https://online.zzbuaoye.net 查看统计数据
@@ -937,6 +961,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    windowManager.removeListener(this);
     _windowChannel.setMethodCallHandler(null);
     _clientConfig?.removeListener(_handleClientConfigChanged);
     if (identical(systemTrayService.onBeforeExit, _prepareForExit)) {
@@ -1099,6 +1124,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               content = ExcludeSemantics(child: content);
             }
             content = _WindowCornerFrame(child: content);
+            content = _BackgroundTickerGate(child: content);
             final mediaQuery = MediaQuery.of(context);
             return MediaQuery(
               data: mediaQuery
@@ -1112,6 +1138,48 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         );
       },
     );
+  }
+}
+
+/// 窗口不可见时冻结整棵树的 Ticker。
+///
+/// 隐藏到托盘或最小化之后，进度环、骨架屏、按钮悬停这些无限循环动画照样
+/// 会把帧排上去，引擎于是一直在 build/layout/paint 一个没人看的画面——
+/// 这是后台占用里最贵、也最容易被忽略的一块。恢复显示时 Ticker 原地续跑。
+class _BackgroundTickerGate extends StatefulWidget {
+  final Widget child;
+
+  const _BackgroundTickerGate({required this.child});
+
+  @override
+  State<_BackgroundTickerGate> createState() => _BackgroundTickerGateState();
+}
+
+class _BackgroundTickerGateState extends State<_BackgroundTickerGate> {
+  final AppPowerModeService _powerMode = AppPowerModeService();
+  late bool _enabled = !_powerMode.isBackground;
+
+  @override
+  void initState() {
+    super.initState();
+    _powerMode.addListener(_handlePowerModeChanged);
+  }
+
+  void _handlePowerModeChanged() {
+    final enabled = !_powerMode.isBackground;
+    if (!mounted || enabled == _enabled) return;
+    setState(() => _enabled = enabled);
+  }
+
+  @override
+  void dispose() {
+    _powerMode.removeListener(_handlePowerModeChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TickerMode(enabled: _enabled, child: widget.child);
   }
 }
 

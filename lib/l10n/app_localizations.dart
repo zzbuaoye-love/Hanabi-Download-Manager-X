@@ -884,6 +884,42 @@ abstract class AppLocalizations {
   /// **'检测到旧版本的自启动注册，已自动更新为当前版本'**
   String get settingsAutoStartFixedMessage;
 
+  /// No description provided for @settingsSectionBackgroundPower.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台与占用'**
+  String get settingsSectionBackgroundPower;
+
+  /// No description provided for @settingsUltraLiteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'极致精简模式'**
+  String get settingsUltraLiteTitle;
+
+  /// No description provided for @settingsUltraLiteSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'窗口长时间留在后台后自动进入超低占用状态：暂停界面刷新、动画与统计采样，只保留下载与浏览器接管等核心业务。重新打开窗口时立即恢复全速。'**
+  String get settingsUltraLiteSubtitle;
+
+  /// No description provided for @settingsUltraLiteIdleTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'进入精简模式的等待时间'**
+  String get settingsUltraLiteIdleTitle;
+
+  /// No description provided for @settingsUltraLiteIdleSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'窗口隐藏到托盘或最小化后，超过这段时间没有被重新拉起就进入极致精简模式'**
+  String get settingsUltraLiteIdleSubtitle;
+
+  /// No description provided for @settingsUltraLiteIdleMinutesLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'{minutes} 分钟'**
+  String settingsUltraLiteIdleMinutesLabel(Object minutes);
+
   /// No description provided for @settingsSectionBehavior.
   ///
   /// In zh, this message translates to:
@@ -1501,6 +1537,222 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'在每个下载卡片显示 HTTP 版本和目标连通性'**
   String get settingsDownloadCardHttpBadgeSubtitle;
+
+  /// No description provided for @settingsGeoBadgeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'IP 归属地徽标'**
+  String get settingsGeoBadgeTitle;
+
+  /// No description provided for @settingsGeoBadgeSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'在下载卡片上显示 出口国 → 目标服务器国 的国旗徽标'**
+  String get settingsGeoBadgeSubtitle;
+
+  /// No description provided for @settingsGeoSourceTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'归属地数据源'**
+  String get settingsGeoSourceTitle;
+
+  /// No description provided for @settingsGeoSourceSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'在线接口即开即用；离线库只用本地数据库和系统 DNS，不联系第三方归属地或公共 DoH'**
+  String get settingsGeoSourceSubtitle;
+
+  /// No description provided for @settingsGeoSourceOnline.
+  ///
+  /// In zh, this message translates to:
+  /// **'在线接口'**
+  String get settingsGeoSourceOnline;
+
+  /// No description provided for @settingsGeoSourceOffline.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线数据库'**
+  String get settingsGeoSourceOffline;
+
+  /// No description provided for @settingsGeoPrivacyNotice.
+  ///
+  /// In zh, this message translates to:
+  /// **'在线模式会把目标 IP 发送给第三方归属地接口，并通过公共 DoH 解析域名；离线模式不会，且无法显示出口国家'**
+  String get settingsGeoPrivacyNotice;
+
+  /// No description provided for @settingsGeoOfflinePackTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线归属地资源包'**
+  String get settingsGeoOfflinePackTitle;
+
+  /// No description provided for @settingsGeoOfflinePackMissing.
+  ///
+  /// In zh, this message translates to:
+  /// **'未安装'**
+  String get settingsGeoOfflinePackMissing;
+
+  /// No description provided for @settingsGeoOfflinePackReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已安装（{size}）'**
+  String settingsGeoOfflinePackReady(String size);
+
+  /// No description provided for @settingsGeoOfflinePackDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载资源包'**
+  String get settingsGeoOfflinePackDownload;
+
+  /// No description provided for @settingsGeoOfflinePackDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载中 {percent}%'**
+  String settingsGeoOfflinePackDownloading(int percent);
+
+  /// No description provided for @settingsGeoOfflinePackRemove.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除资源包'**
+  String get settingsGeoOfflinePackRemove;
+
+  /// No description provided for @settingsGeoOfflinePackFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'资源包下载失败：{error}'**
+  String settingsGeoOfflinePackFailed(String error);
+
+  /// No description provided for @settingsGeoOfflinePackSourceNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'数据来自 ip-location-db（CC0 公共领域）'**
+  String get settingsGeoOfflinePackSourceNote;
+
+  /// No description provided for @geoBadgeLocalEndpoint.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机 / 内网'**
+  String get geoBadgeLocalEndpoint;
+
+  /// No description provided for @settingsGeoAccuracyNoticeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'出口国的精度限制'**
+  String get settingsGeoAccuracyNoticeTitle;
+
+  /// No description provided for @settingsGeoAccuracyNotice.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用 Clash / mihomo / sing-box 等本机规则型代理时，分流规则位于代理客户端内部，本应用只能看到本地监听地址，无法得知某个下载目标实际命中了哪条规则——同一个客户端完全可能让 A 站点走境外节点、B 站点直连。此时徽标显示的出口国为近似值，徽标提示中会明确标注。目标服务器国不受影响。'**
+  String get settingsGeoAccuracyNotice;
+
+  /// No description provided for @geoBadgeEgressRuleBased.
+  ///
+  /// In zh, this message translates to:
+  /// **'代理为本机规则型客户端，实际分流规则不可见；出口国为近似值'**
+  String get geoBadgeEgressRuleBased;
+
+  /// No description provided for @settingsGeoPackUrlTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'资源包下载源'**
+  String get settingsGeoPackUrlTitle;
+
+  /// No description provided for @settingsGeoPackUrlSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'内置源均位于境外；可改为镜像地址或自建源'**
+  String get settingsGeoPackUrlSubtitle;
+
+  /// No description provided for @settingsGeoPackUrlPlaceholder.
+  ///
+  /// In zh, this message translates to:
+  /// **'留空则使用内置默认源'**
+  String get settingsGeoPackUrlPlaceholder;
+
+  /// No description provided for @settingsGeoPackUrlSave.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get settingsGeoPackUrlSave;
+
+  /// No description provided for @settingsGeoPackUrlReset.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复默认'**
+  String get settingsGeoPackUrlReset;
+
+  /// No description provided for @settingsGeoPackUrlInvalid.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载地址无效'**
+  String get settingsGeoPackUrlInvalid;
+
+  /// No description provided for @settingsGeoPackUrlSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载源已更新'**
+  String get settingsGeoPackUrlSaved;
+
+  /// No description provided for @settingsGeoPackPresetLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'内置源'**
+  String get settingsGeoPackPresetLabel;
+
+  /// No description provided for @settingsGeoPackPresetJsdelivr.
+  ///
+  /// In zh, this message translates to:
+  /// **'jsDelivr（支持断点续传）'**
+  String get settingsGeoPackPresetJsdelivr;
+
+  /// No description provided for @settingsGeoPackPresetUnpkg.
+  ///
+  /// In zh, this message translates to:
+  /// **'unpkg（更快，不支持续传）'**
+  String get settingsGeoPackPresetUnpkg;
+
+  /// No description provided for @settingsGeoPackImportTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'从本地文件导入'**
+  String get settingsGeoPackImportTitle;
+
+  /// No description provided for @settingsGeoPackImportSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载源被阻断时，可自行下载资源包后导入；支持 ip-location-db 与 IP2Location LITE 的 CSV，可为 .gz 压缩包'**
+  String get settingsGeoPackImportSubtitle;
+
+  /// No description provided for @settingsGeoPackImportButton.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择文件导入'**
+  String get settingsGeoPackImportButton;
+
+  /// No description provided for @settingsGeoPackImportValidating.
+  ///
+  /// In zh, this message translates to:
+  /// **'校验中…'**
+  String get settingsGeoPackImportValidating;
+
+  /// No description provided for @settingsGeoPackImportSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入成功（{size}）'**
+  String settingsGeoPackImportSuccess(String size);
+
+  /// No description provided for @settingsGeoPackImportFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入失败：{error}'**
+  String settingsGeoPackImportFailed(String error);
+
+  /// No description provided for @settingsGeoPackImportPickerTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择离线归属地资源包'**
+  String get settingsGeoPackImportPickerTitle;
 
   /// No description provided for @settingsDefaultUserAgentTitle.
   ///
@@ -4622,6 +4874,66 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已识别为 {type}，但当前版本暂不支持直接下载'**
   String downloadIntentUnsupportedType(Object type);
+
+  /// No description provided for @addDownloadSupportedProtocolsLabel.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前支持'**
+  String get addDownloadSupportedProtocolsLabel;
+
+  /// No description provided for @addDownloadProtocolHttp.
+  ///
+  /// In zh, this message translates to:
+  /// **'HTTP/HTTPS'**
+  String get addDownloadProtocolHttp;
+
+  /// No description provided for @addDownloadProtocolMagnet.
+  ///
+  /// In zh, this message translates to:
+  /// **'磁力链接'**
+  String get addDownloadProtocolMagnet;
+
+  /// No description provided for @addDownloadProtocolTorrentFile.
+  ///
+  /// In zh, this message translates to:
+  /// **'种子文件'**
+  String get addDownloadProtocolTorrentFile;
+
+  /// No description provided for @addDownloadProtocolEd2k.
+  ///
+  /// In zh, this message translates to:
+  /// **'ED2K'**
+  String get addDownloadProtocolEd2k;
+
+  /// No description provided for @addDownloadProtocolResolver.
+  ///
+  /// In zh, this message translates to:
+  /// **'解析器'**
+  String get addDownloadProtocolResolver;
+
+  /// No description provided for @addDownloadProtocolBuiltIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'内置支持'**
+  String get addDownloadProtocolBuiltIn;
+
+  /// No description provided for @addDownloadProtocolProvidedBy.
+  ///
+  /// In zh, this message translates to:
+  /// **'由 {provider} 插件提供'**
+  String addDownloadProtocolProvidedBy(Object provider);
+
+  /// No description provided for @addDownloadIntentPluginReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已识别为 {type}，将由「{plugin}」插件处理'**
+  String addDownloadIntentPluginReady(Object type, Object plugin);
+
+  /// No description provided for @addDownloadIntentNoPlugin.
+  ///
+  /// In zh, this message translates to:
+  /// **'已识别为 {type}，但没有已启用的插件支持它。请在插件页安装或启用对应插件'**
+  String addDownloadIntentNoPlugin(Object type);
 
   /// No description provided for @addDownloadErrorAddFailed.
   ///
@@ -7811,6 +8123,78 @@ abstract class AppLocalizations {
   /// **'限并发 x{count}'**
   String downloadBadgeConcurrencyCap(Object count);
 
+  /// No description provided for @geoBadgeResolving.
+  ///
+  /// In zh, this message translates to:
+  /// **'定位中…'**
+  String get geoBadgeResolving;
+
+  /// No description provided for @geoBadgeUnknownCountry.
+  ///
+  /// In zh, this message translates to:
+  /// **'未知'**
+  String get geoBadgeUnknownCountry;
+
+  /// No description provided for @geoBadgeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'定位失败'**
+  String get geoBadgeFailed;
+
+  /// No description provided for @geoBadgeDisabledHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'IP 归属地徽标已关闭'**
+  String get geoBadgeDisabledHint;
+
+  /// No description provided for @geoBadgeTooltipEgress.
+  ///
+  /// In zh, this message translates to:
+  /// **'发起出口'**
+  String get geoBadgeTooltipEgress;
+
+  /// No description provided for @geoBadgeTooltipTarget.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标服务器'**
+  String get geoBadgeTooltipTarget;
+
+  /// No description provided for @geoBadgeTooltipVia.
+  ///
+  /// In zh, this message translates to:
+  /// **'经代理'**
+  String get geoBadgeTooltipVia;
+
+  /// No description provided for @geoBadgeTooltipDirect.
+  ///
+  /// In zh, this message translates to:
+  /// **'直连'**
+  String get geoBadgeTooltipDirect;
+
+  /// No description provided for @geoBadgeUplink.
+  ///
+  /// In zh, this message translates to:
+  /// **'上行'**
+  String get geoBadgeUplink;
+
+  /// No description provided for @geoBadgeDownlink.
+  ///
+  /// In zh, this message translates to:
+  /// **'下行'**
+  String get geoBadgeDownlink;
+
+  /// No description provided for @geoBadgeSourceOnlineTag.
+  ///
+  /// In zh, this message translates to:
+  /// **'在线'**
+  String get geoBadgeSourceOnlineTag;
+
+  /// No description provided for @geoBadgeSourceOfflineTag.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线库'**
+  String get geoBadgeSourceOfflineTag;
+
   /// No description provided for @downloadFailureHintAuth.
   ///
   /// In zh, this message translates to:
@@ -7984,6 +8368,72 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'打开链接'**
   String get noticeOpenLink;
+
+  /// No description provided for @noticeViewCards.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换到卡片视图'**
+  String get noticeViewCards;
+
+  /// No description provided for @noticeViewSplit.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换到分栏视图'**
+  String get noticeViewSplit;
+
+  /// No description provided for @noticeLevelInfo.
+  ///
+  /// In zh, this message translates to:
+  /// **'信息'**
+  String get noticeLevelInfo;
+
+  /// No description provided for @noticeLevelSuccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新'**
+  String get noticeLevelSuccess;
+
+  /// No description provided for @noticeLevelWarning.
+  ///
+  /// In zh, this message translates to:
+  /// **'注意'**
+  String get noticeLevelWarning;
+
+  /// No description provided for @noticeLevelCritical.
+  ///
+  /// In zh, this message translates to:
+  /// **'重要'**
+  String get noticeLevelCritical;
+
+  /// No description provided for @noticeEmptySubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'这里会显示来自 Hanabi 的公告与更新说明'**
+  String get noticeEmptySubtitle;
+
+  /// No description provided for @noticeSelectPromptTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择一条通知'**
+  String get noticeSelectPromptTitle;
+
+  /// No description provided for @noticeSelectPromptSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'从左侧列表中选择通知即可阅读完整内容'**
+  String get noticeSelectPromptSubtitle;
+
+  /// No description provided for @noticeCloseDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭详情'**
+  String get noticeCloseDetail;
+
+  /// No description provided for @noticeListHeader.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {count} 条通知'**
+  String noticeListHeader(Object count);
 
   /// No description provided for @settingsLogManagementSection.
   ///

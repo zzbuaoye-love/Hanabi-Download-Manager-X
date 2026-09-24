@@ -1,8 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:fluent_ui/fluent_ui.dart' as fluent;
 
-/// 页面切换动画组件 - 优化版本
-/// 使用 RepaintBoundary 减少重绘，优化动画曲线
+/// Windows 11 `NavigationView` 的页面入场动效常量。
+///
+/// 对应 XAML 的 `EntranceNavigationTransitionInfo`：内容从下方 28px 处
+/// 上移归位，同时淡入；缓动用 Fluent 标准曲线 KeySpline(0.1, 0.9, 0.2, 1.0)。
+/// 注意位移是**像素**而不是比例 —— 用 SlideTransition 的分数位移会随页面宽高
+/// 变化，窗口越大滑得越远，那不是 WinUI 的观感。
+class WinUiEntranceMotion {
+  const WinUiEntranceMotion._();
+
+  static const Duration duration = Duration(milliseconds: 300);
+  static const Curve curve = Cubic(0.1, 0.9, 0.2, 1.0);
+  static const double verticalOffset = 28;
+
+  /// 淡入在前 60% 完成，避免位移还没结束就已经完全不透明。
+  static const Interval fadeInterval = Interval(0, 0.6, curve: Curves.easeOut);
+
+  /// 把一段 0→1 的动画包装成 Win11 入场效果。
+  static Widget build(Animation<double> animation, Widget child) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, inner) {
+        final t = curve.transform(animation.value.clamp(0.0, 1.0));
+        return Opacity(
+          opacity: fadeInterval.transform(animation.value.clamp(0.0, 1.0)),
+          child: Transform.translate(
+            offset: Offset(0, verticalOffset * (1 - t)),
+            child: inner,
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
+/// 页面切换动画组件 — Windows 11 NavigationView 同款入场
 class PageTransition extends StatefulWidget {
   final Widget child;
   final String pageKey;
@@ -13,8 +47,8 @@ class PageTransition extends StatefulWidget {
     super.key,
     required this.child,
     required this.pageKey,
-    this.duration = const Duration(milliseconds: 300), // 更快的切换
-    this.curve = Curves.easeOutCubic,
+    this.duration = WinUiEntranceMotion.duration,
+    this.curve = WinUiEntranceMotion.curve,
   });
 
   @override
@@ -24,8 +58,6 @@ class PageTransition extends StatefulWidget {
 class _PageTransitionState extends State<PageTransition>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _fadeAnimation;
-  late Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
@@ -34,34 +66,17 @@ class _PageTransitionState extends State<PageTransition>
       duration: widget.duration,
       vsync: this,
     );
-    _setupAnimations();
     _controller.forward();
-  }
-  
-  void _setupAnimations() {
-    _fadeAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-    ));
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0.05, 0), // 更小的位移，更优雅
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: widget.curve,
-    ));
   }
 
   @override
   void didUpdateWidget(PageTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.duration != widget.duration) {
+      _controller.duration = widget.duration;
+    }
     if (oldWidget.pageKey != widget.pageKey) {
-      _controller.reset();
-      _controller.forward();
+      _controller.forward(from: 0);
     }
   }
 
@@ -74,19 +89,7 @@ class _PageTransitionState extends State<PageTransition>
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          return SlideTransition(
-            position: _slideAnimation,
-            child: FadeTransition(
-              opacity: _fadeAnimation,
-              child: child,
-            ),
-          );
-        },
-        child: widget.child,
-      ),
+      child: WinUiEntranceMotion.build(_controller, widget.child),
     );
   }
 }
@@ -238,7 +241,7 @@ class _ListItemAnimationState extends State<ListItemAnimation>
     // 限制最大延迟
     final effectiveIndex = widget.index.clamp(0, widget.maxStaggerIndex);
     final delay = widget.delay * effectiveIndex;
-    
+
     Future.delayed(delay, () {
       if (mounted) {
         _controller.forward();
@@ -307,7 +310,7 @@ class _FadeInAnimationState extends State<FadeInAnimation>
       parent: _controller,
       curve: widget.curve,
     );
-    
+
     if (widget.delay == Duration.zero) {
       _controller.forward();
     } else {
@@ -368,14 +371,14 @@ class _ScaleFadeInAnimationState extends State<ScaleFadeInAnimation>
       duration: widget.duration,
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
         curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
       ),
     );
-    
+
     _scaleAnimation = Tween<double>(
       begin: widget.beginScale,
       end: 1.0,
@@ -383,7 +386,7 @@ class _ScaleFadeInAnimationState extends State<ScaleFadeInAnimation>
       parent: _controller,
       curve: widget.curve,
     ));
-    
+
     if (widget.delay == Duration.zero) {
       _controller.forward();
     } else {

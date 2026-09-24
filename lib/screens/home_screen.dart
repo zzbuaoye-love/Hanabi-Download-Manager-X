@@ -10,6 +10,7 @@ import '../utils/fluent_icons.dart' as CustomIcons;
 import '../services/integrated_download_service.dart';
 import '../services/developer_mode_service.dart';
 import '../services/app_logger_service.dart';
+import '../services/app_power_mode_service.dart';
 import '../services/kernel/kernel_manager.dart';
 import '../services/plugin_diagnostic_logger.dart';
 import '../services/window_effect_service.dart';
@@ -39,6 +40,7 @@ import 'widgets/debug/connection_debug_page.dart';
 import 'widgets/performance_monitor_page.dart';
 import 'widgets/update_dialog.dart';
 import 'widgets/plugin_sidebar_page.dart';
+import 'widgets/plugin_custom_page.dart';
 import '../services/plugin_lifecycle_service.dart';
 import '../models/plugin_manifest.dart';
 
@@ -49,6 +51,7 @@ class NavigationItem {
   final String title;
   final Widget body;
   final InstalledPlugin? plugin;
+  final PluginPageExtension? pageExtension;
   final bool isBottomPlacement;
 
   NavigationItem({
@@ -58,6 +61,7 @@ class NavigationItem {
     required this.title,
     required this.body,
     this.plugin,
+    this.pageExtension,
     this.isBottomPlacement = false,
   }) : assert(icon != null || iconBuilder != null);
 }
@@ -138,6 +142,58 @@ class _HomeScreenState extends State<HomeScreen>
     final showConnectionDebugPage = context
         .select<DeveloperModeService, bool>((s) => s.showConnectionDebugPage);
 
+    final pluginService = context.watch<PluginLifecycleService>();
+
+    // Resolve an enabled plugin page that replaces the built-in completed
+    // page (highest manifest priority wins).
+    InstalledPlugin? completedOverridePlugin;
+    PluginPageExtension? completedOverridePage;
+    for (final plugin in pluginService.plugins) {
+      if (!plugin.enabled) continue;
+      for (final page in plugin.manifest.pageExtensions) {
+        if (page.replaces != _pageCompleted) continue;
+        if (completedOverridePlugin == null ||
+            plugin.manifest.priority >
+                completedOverridePlugin.manifest.priority) {
+          completedOverridePlugin = plugin;
+          completedOverridePage = page;
+        }
+      }
+    }
+
+    NavigationItem completedItem;
+    if (completedOverridePlugin != null && completedOverridePage != null) {
+      final overrideIconRaw = completedOverridePage.icon;
+      final overrideIcon = overrideIconRaw == null
+          ? null
+          : _resolvePluginNavIcon(completedOverridePlugin, overrideIconRaw);
+      completedItem = NavigationItem(
+        id: _pageCompleted,
+        icon: overrideIcon?.builder != null
+            ? null
+            : (overrideIcon?.icon ?? CustomIcons.FluentIcons.completed_solid),
+        iconBuilder: overrideIcon?.builder,
+        title: completedOverridePage.title.isNotEmpty
+            ? completedOverridePage.title
+            : t.homeNavCompleted,
+        body: PluginCustomPage(
+          key: ValueKey(
+            'plugin_page_${completedOverridePlugin.id}_${completedOverridePage.id}',
+          ),
+          plugin: completedOverridePlugin,
+          page: completedOverridePage,
+          isChinese: isChinese,
+        ),
+      );
+    } else {
+      completedItem = NavigationItem(
+        id: _pageCompleted,
+        icon: CustomIcons.FluentIcons.completed_solid,
+        title: t.homeNavCompleted,
+        body: const CompletedList(),
+      );
+    }
+
     final items = <NavigationItem>[
       NavigationItem(
         id: _pageDownloading,
@@ -145,12 +201,7 @@ class _HomeScreenState extends State<HomeScreen>
         title: t.homeNavDownloading,
         body: const DownloadList(),
       ),
-      NavigationItem(
-        id: _pageCompleted,
-        icon: CustomIcons.FluentIcons.completed_solid,
-        title: t.homeNavCompleted,
-        body: const CompletedList(),
-      ),
+      completedItem,
       NavigationItem(
         id: _pagePlugins,
         icon: CustomIcons.FluentIcons.app_icon_default,
@@ -159,68 +210,49 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     ];
 
-    // Inject Plugin Sidebar Pages
-    final pluginService = context.watch<PluginLifecycleService>();
+    // Inject plugin sidebar panels and standalone plugin pages
     final pluginNavIds = <String>[];
+    if (completedOverridePlugin != null && completedOverridePage != null) {
+      pluginNavIds.add(
+        '${completedOverridePlugin.id}:replaces:${completedOverridePage.id}',
+      );
+    }
     for (final plugin in pluginService.plugins) {
-      if (plugin.enabled &&
-          plugin.manifest.uiExtensions?['sidebar']?.isNotEmpty == true) {
+      if (!plugin.enabled) continue;
+
+      if (plugin.manifest.uiExtensions?['sidebar']?.isNotEmpty == true) {
         pluginNavIds
             .add('${plugin.id}:${plugin.manifest.sidebarPlacement.name}');
-        IconData? iconData;
-        Widget Function(BuildContext, Color)? iconBuilder;
-
-        final iconRaw = plugin.manifest.icon;
-        if (iconRaw != null && iconRaw.isNotEmpty) {
-          if (iconRaw.startsWith('fluent:')) {
-            final iconName = iconRaw.substring(7);
-            iconData = CustomIcons.FluentIcons.getIcon(iconName);
-          } else {
-            // treat as a local file inside plugin.directory
-            iconBuilder = (context, color) {
-              final iconFile = File(path.join(plugin.directory, iconRaw));
-              if (!iconFile.existsSync()) {
-                _diag.mark(
-                  'home.pluginIcon.missing',
-                  pluginId: plugin.id,
-                  data: <String, Object?>{'path': iconFile.path},
-                );
-                return Icon(CustomIcons.FluentIcons.app_icon_default,
-                    size: 16, color: color);
-              }
-              return Image.file(
-                iconFile,
-                width: 16,
-                height: 16,
-                color: color,
-                errorBuilder: (context, error, stackTrace) {
-                  _diag.error(
-                    'home.pluginIcon.error',
-                    error,
-                    pluginId: plugin.id,
-                    stackTrace: stackTrace,
-                    data: <String, Object?>{'path': iconFile.path},
-                  );
-                  return Icon(CustomIcons.FluentIcons.app_icon_default,
-                      size: 16, color: color);
-                },
-              );
-            };
-          }
-        } else {
-          iconData = CustomIcons.FluentIcons.app_icon_default;
-        }
-
+        final iconParts = _resolvePluginNavIcon(plugin, plugin.manifest.icon);
         items.add(
           NavigationItem(
             id: 'plugin_${plugin.id}',
-            icon: iconData,
-            iconBuilder: iconBuilder,
+            icon: iconParts.icon,
+            iconBuilder: iconParts.builder,
             title: plugin.name,
             body: const SizedBox.shrink(),
             plugin: plugin,
             isBottomPlacement: plugin.manifest.sidebarPlacement ==
                 PluginSidebarPlacement.bottom,
+          ),
+        );
+      }
+
+      for (final page in plugin.manifest.pageExtensions) {
+        if (page.replaces != null) continue; // replacements handled above
+        pluginNavIds.add('${plugin.id}:page:${page.id}:${page.placement.name}');
+        final iconParts =
+            _resolvePluginNavIcon(plugin, page.icon ?? plugin.manifest.icon);
+        items.add(
+          NavigationItem(
+            id: 'plugin_page_${plugin.id}_${page.id}',
+            icon: iconParts.icon,
+            iconBuilder: iconParts.builder,
+            title: page.title.isNotEmpty ? page.title : plugin.name,
+            body: const SizedBox.shrink(),
+            plugin: plugin,
+            pageExtension: page,
+            isBottomPlacement: page.placement == PluginSidebarPlacement.bottom,
           ),
         );
       }
@@ -311,6 +343,55 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _isBottomNavItem(NavigationItem item) {
     return _bottomPageIds.contains(item.id) || item.isBottomPlacement;
+  }
+
+  /// Resolves a plugin-provided icon reference (`fluent:<name>` or a relative
+  /// image path inside the plugin directory) into nav item icon parts.
+  ({IconData? icon, Widget Function(BuildContext, Color)? builder})
+      _resolvePluginNavIcon(InstalledPlugin plugin, String? iconRaw) {
+    IconData? iconData;
+    Widget Function(BuildContext, Color)? iconBuilder;
+
+    if (iconRaw != null && iconRaw.isNotEmpty) {
+      if (iconRaw.startsWith('fluent:')) {
+        iconData = CustomIcons.FluentIcons.getIcon(iconRaw.substring(7));
+      } else {
+        // treat as a local file inside plugin.directory
+        iconBuilder = (context, color) {
+          final iconFile = File(path.join(plugin.directory, iconRaw));
+          if (!iconFile.existsSync()) {
+            _diag.mark(
+              'home.pluginIcon.missing',
+              pluginId: plugin.id,
+              data: <String, Object?>{'path': iconFile.path},
+            );
+            return Icon(CustomIcons.FluentIcons.app_icon_default,
+                size: 16, color: color);
+          }
+          return Image.file(
+            iconFile,
+            width: 16,
+            height: 16,
+            color: color,
+            errorBuilder: (context, error, stackTrace) {
+              _diag.error(
+                'home.pluginIcon.error',
+                error,
+                pluginId: plugin.id,
+                stackTrace: stackTrace,
+                data: <String, Object?>{'path': iconFile.path},
+              );
+              return Icon(CustomIcons.FluentIcons.app_icon_default,
+                  size: 16, color: color);
+            },
+          );
+        };
+      }
+    } else {
+      iconData = CustomIcons.FluentIcons.app_icon_default;
+    }
+
+    return (icon: iconData, builder: iconBuilder);
   }
 
   @override
@@ -670,6 +751,8 @@ class _HomeScreenState extends State<HomeScreen>
   void _startWindowSizeMonitoring() {
     _windowSizeCheckTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!mounted) return;
+      // 窗口不可见时尺寸不可能变化，这一趟原生查询纯属浪费。
+      if (AppPowerModeService().isBackground) return;
       unawaited(_checkAndSaveWindowSize());
     });
   }
@@ -940,7 +1023,7 @@ class _HomeScreenState extends State<HomeScreen>
                     }),
                     shape: WidgetStateProperty.all(
                       RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(4),
                         side: BorderSide.none,
                       ),
                     ),
@@ -1070,6 +1153,38 @@ class _HomeScreenState extends State<HomeScreen>
     if (isKernelRunning || isDebugPage || isPluginPage) {
       final plugin = currentItem.plugin;
       if (plugin != null) {
+        final isChinese = Localizations.localeOf(context)
+            .languageCode
+            .toLowerCase()
+            .startsWith('zh');
+
+        final pageExtension = currentItem.pageExtension;
+        if (pageExtension != null) {
+          _markPageContent(
+            'pluginPage:${plugin.id}:${pageExtension.id}',
+            <String, Object?>{
+              'currentIndex': _currentIndex,
+              'currentPageId': currentPageId,
+              'pluginId': plugin.id,
+              'pageId': pageExtension.id,
+              'provider': pageExtension.provider,
+              'enabled': plugin.enabled,
+            },
+          );
+          return RepaintBoundary(
+            child: KeyedSubtree(
+              key: ValueKey(
+                'plugin_${plugin.id}_page_${pageExtension.id}_active',
+              ),
+              child: PluginCustomPage(
+                plugin: plugin,
+                page: pageExtension,
+                isChinese: isChinese,
+              ),
+            ),
+          );
+        }
+
         _markPageContent(
           'plugin:${plugin.id}',
           <String, Object?>{
@@ -1081,10 +1196,6 @@ class _HomeScreenState extends State<HomeScreen>
             'enabled': plugin.enabled,
           },
         );
-        final isChinese = Localizations.localeOf(context)
-            .languageCode
-            .toLowerCase()
-            .startsWith('zh');
         return RepaintBoundary(
           child: KeyedSubtree(
             key: ValueKey('plugin_${plugin.id}_active_page'),
@@ -1954,6 +2065,13 @@ class _NavItemState extends State<_NavItem> with TickerProviderStateMixin {
       (selectValue + hoverValue * (1 - selectValue)).clamp(0.0, 1.0),
     )!;
 
+    // WinUI 3 NavigationView: 深色模式下 pill 使用亮 accent，浅色使用深 accent
+    final pillColor = Color.lerp(
+      AppTheme.accentLight,
+      AppTheme.accentPrimary,
+      AppTheme.lightProgress,
+    )!;
+
     return Container(
       height: 36,
       padding: EdgeInsets.symmetric(horizontal: contentHorizontalPadding),
@@ -1962,7 +2080,7 @@ class _NavItemState extends State<_NavItem> with TickerProviderStateMixin {
           hoverValue: hoverValue,
           selectedValue: selectValue,
         ),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Stack(
         children: [
@@ -1976,7 +2094,7 @@ class _NavItemState extends State<_NavItem> with TickerProviderStateMixin {
                 height: (16 * selectValue).clamp(0.0, 16.0),
                 margin: EdgeInsets.only(right: indicatorRightMargin),
                 decoration: BoxDecoration(
-                  color: AppTheme.accentPrimary,
+                  color: pillColor,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),

@@ -1,0 +1,3 @@
+tags:
+  preview:
+    skip: "Visual artifact generators are opt-in; use --run-skipped --tags preview."

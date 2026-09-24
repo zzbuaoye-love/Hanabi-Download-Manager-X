@@ -169,7 +169,14 @@ void CleanupClosedPopupWindows() {
       g_popup_windows.end());
 }
 
-void PositionTrayMenuWindow(HWND hwnd, double target_x, double target_y) {
+// anchor_visual_width/height describe the visible main panel in physical
+// pixels. The window itself is an envelope that also reserves space for the
+// widest possible submenu, so centering on the full window rect would hang the
+// visible menu noticeably left of the cursor. Pass 0 to fall back to the
+// window dimensions.
+void PositionTrayMenuWindow(HWND hwnd, double target_x, double target_y,
+                            int anchor_visual_width = 0,
+                            int anchor_visual_height = 0) {
   if (!hwnd) {
     return;
   }
@@ -178,6 +185,12 @@ void PositionTrayMenuWindow(HWND hwnd, double target_x, double target_y) {
   GetWindowRect(hwnd, &menu_rect);
   const int menu_width = menu_rect.right - menu_rect.left;
   const int menu_height = menu_rect.bottom - menu_rect.top;
+  const int visual_width =
+      anchor_visual_width > 0 ? std::min(anchor_visual_width, menu_width)
+                              : menu_width;
+  const int visual_height =
+      anchor_visual_height > 0 ? std::min(anchor_visual_height, menu_height)
+                               : menu_height;
 
   POINT anchor{static_cast<LONG>(std::lround(target_x)),
                static_cast<LONG>(std::lround(target_y))};
@@ -195,13 +208,14 @@ void PositionTrayMenuWindow(HWND hwnd, double target_x, double target_y) {
   const RECT& work_area = monitor_info.rcWork;
   const int gap = ScaleForWindowDpi(hwnd, 6);
   const int edge_margin = ScaleForWindowDpi(hwnd, 2);
-  int pos_x = anchor.x - (menu_width / 2);
-  const int position_above = anchor.y - menu_height - gap;
+  int pos_x = anchor.x - (visual_width / 2);
+  const int position_above = anchor.y - visual_height - gap;
   const int position_below = anchor.y + gap;
   int pos_y = position_above >= work_area.top + edge_margin
                   ? position_above
                   : position_below;
 
+  // Clamp with the full envelope so the submenu area cannot fall off-screen.
   if (pos_x + menu_width > work_area.right - edge_margin) {
     pos_x = work_area.right - edge_margin - menu_width;
   }
@@ -923,8 +937,12 @@ void FlutterWindow::SetupMethodChannel() {
                                     ? 172
                                     : kind_ == WindowKind::kPopup ? 520
                                                                   : current_width;
+          // The tray window is an envelope: main panel (<=228) + gap +
+          // widest submenu (<=228) + insets (24) can reach ~490 logical px.
+          // The old 420 cap silently sliced the submenu off at the right
+          // edge whenever both panels were near their maximum width.
           const int max_width = kind_ == WindowKind::kTrayMenu
-                                    ? 420
+                                    ? 560
                                     : kind_ == WindowKind::kPopup ? 720
                                                                   : current_width;
           const int min_height =
@@ -933,6 +951,12 @@ void FlutterWindow::SetupMethodChannel() {
               kind_ == WindowKind::kTrayMenu ? 600 : 900;
           const int safe_width = std::max(min_width, std::min(max_width, width));
           const int safe_height = std::max(min_height, std::min(max_height, height));
+          if (kind_ == WindowKind::kTrayMenu) {
+            // Remembered so positionTrayMenu can re-derive the physical size
+            // after moving the window onto a monitor with a different DPI.
+            tray_menu_logical_width_ = safe_width;
+            tray_menu_logical_height_ = safe_height;
+          }
           const int target_width = kind_ == WindowKind::kTrayMenu
                                        ? ScaleForWindowDpi(hwnd, safe_width)
                                        : safe_width;
@@ -944,9 +968,44 @@ void FlutterWindow::SetupMethodChannel() {
                                       backdrop_controller_
                                           ->SuspendLegacyEffectForMove();
 
-          const BOOL ok = SetWindowPos(
-              hwnd, nullptr, 0, 0, target_width, target_height,
-              SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+          // A visible tray menu growing for a submenu must stay inside the
+          // work area: near the screen's right edge the growth direction is
+          // off-screen, so shift the window left/up by exactly the overflow.
+          int new_x = rect.left;
+          int new_y = rect.top;
+          UINT position_flags =
+              SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER;
+          bool reposition = false;
+          if (kind_ == WindowKind::kTrayMenu && IsWindowVisible(hwnd)) {
+            MONITORINFO monitor_info{};
+            monitor_info.cbSize = sizeof(monitor_info);
+            if (GetMonitorInfo(
+                    MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                    &monitor_info)) {
+              const RECT& work_area = monitor_info.rcWork;
+              const int edge_margin = ScaleForWindowDpi(hwnd, 2);
+              if (new_x + target_width > work_area.right - edge_margin) {
+                new_x = work_area.right - edge_margin - target_width;
+              }
+              if (new_x < work_area.left + edge_margin) {
+                new_x = work_area.left + edge_margin;
+              }
+              if (new_y + target_height > work_area.bottom - edge_margin) {
+                new_y = work_area.bottom - edge_margin - target_height;
+              }
+              if (new_y < work_area.top + edge_margin) {
+                new_y = work_area.top + edge_margin;
+              }
+              reposition = new_x != rect.left || new_y != rect.top;
+            }
+          }
+          if (!reposition) {
+            position_flags |= SWP_NOMOVE;
+          }
+
+          const BOOL ok =
+              SetWindowPos(hwnd, nullptr, new_x, new_y, target_width,
+                           target_height, position_flags);
 
           if (suspended_here) {
             backdrop_controller_->ResumeLegacyEffectAfterMove();
@@ -1102,6 +1161,17 @@ void FlutterWindow::SetupMethodChannel() {
             delete request_ptr;
           }).detach();
           return;
+        } else if (call.method_name() == "trimWorkingSet") {
+          // Hand cold pages back to the OS when ultra lite mode kicks in.
+          // (SIZE_T)-1 for both bounds is the documented "trim as much as you
+          // can" request: the pages are not discarded, they move to the standby
+          // list and are faulted back on demand, so waking the window up again
+          // stays fast.
+          const BOOL trimmed = ::SetProcessWorkingSetSize(
+              ::GetCurrentProcess(), static_cast<SIZE_T>(-1),
+              static_cast<SIZE_T>(-1));
+          result->Success(flutter::EncodableValue(trimmed != FALSE));
+          return;
         } else if (call.method_name() == "quitApplication") {
           const HWND hwnd = GetHandle();
           result->Success(flutter::EncodableValue(hwnd != nullptr));
@@ -1126,7 +1196,53 @@ void FlutterWindow::SetupMethodChannel() {
               if (x_it != arguments->end() && y_it != arguments->end()) {
                 double target_x = std::get<double>(x_it->second);
                 double target_y = std::get<double>(y_it->second);
-                PositionTrayMenuWindow(hwnd, target_x, target_y);
+
+                const auto read_logical_int =
+                    [arguments](const char* name) -> int {
+                  auto it = arguments->find(flutter::EncodableValue(name));
+                  if (it == arguments->end()) {
+                    return 0;
+                  }
+                  if (const int32_t* v32 = std::get_if<int32_t>(&it->second)) {
+                    return *v32;
+                  }
+                  if (const int64_t* v64 = std::get_if<int64_t>(&it->second)) {
+                    return static_cast<int>(*v64);
+                  }
+                  return 0;
+                };
+                const int anchor_logical_w = read_logical_int("anchorWidth");
+                const int anchor_logical_h = read_logical_int("anchorHeight");
+
+                POINT anchor{static_cast<LONG>(std::lround(target_x)),
+                             static_cast<LONG>(std::lround(target_y))};
+                if (anchor.x == 0 && anchor.y == 0) {
+                  GetCursorPos(&anchor);
+                }
+
+                // The window sat hidden on whatever monitor it was created
+                // on, and resizeWindow scaled by THAT monitor's DPI. Park it
+                // at the anchor first so it adopts the target monitor's DPI,
+                // then re-derive the physical size from the remembered
+                // logical size. Skipping this showed a menu scaled for the
+                // wrong monitor — visually cut through the middle on any
+                // mixed-DPI setup.
+                SetWindowPos(hwnd, HWND_TOPMOST, anchor.x, anchor.y, 0, 0,
+                             SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                if (tray_menu_logical_width_ > 0 &&
+                    tray_menu_logical_height_ > 0) {
+                  SetWindowPos(
+                      hwnd, nullptr, 0, 0,
+                      ScaleForWindowDpi(hwnd, tray_menu_logical_width_),
+                      ScaleForWindowDpi(hwnd, tray_menu_logical_height_),
+                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                          SWP_NOZORDER);
+                }
+
+                PositionTrayMenuWindow(
+                    hwnd, target_x, target_y,
+                    ScaleForWindowDpi(hwnd, anchor_logical_w),
+                    ScaleForWindowDpi(hwnd, anchor_logical_h));
                 ::ShowWindow(hwnd, SW_SHOWNORMAL);
                 SetForegroundWindow(hwnd);
                 SetFocus(hwnd);

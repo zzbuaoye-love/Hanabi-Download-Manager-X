@@ -10,6 +10,8 @@ import '../../models/download_task.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/file_icon_widget.dart';
 import '../../widgets/animated_card.dart';
+import '../../widgets/fluent_interactions.dart';
+import '../../widgets/scroll_edge_fade.dart';
 import '../../widgets/smooth_scroll_wrapper.dart';
 import '../../utils/fluent_icons.dart' as CustomIcons;
 import '../../widgets/animated_notifications.dart';
@@ -308,27 +310,31 @@ class _CompletedListState extends State<CompletedList> {
               Expanded(
                 child: currentTasks.isEmpty
                     ? _buildNoResultsState(context)
-                    : SmoothListView.builder(
-                        padding: const EdgeInsets.all(20),
-                        itemCount: currentTasks.length,
-                        // 性能优化：增加缓存区域
-                        cacheExtent: 500,
-                        addRepaintBoundaries: true,
-                        addAutomaticKeepAlives: false,
-                        // 平滑滚动配置 - 使用快速响应模式
-                        config: SmoothScrollConfig.fast,
-                        itemBuilder: (context, index) {
-                          final task = currentTasks[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: RepaintBoundary(
-                              child: _CompletedTaskCard(
-                                key: ValueKey(task.id),
-                                task: task,
+                    : ScrollEdgeFade(
+                        topExtent: 20,
+                        bottomExtent: 20,
+                        child: SmoothListView.builder(
+                          padding: const EdgeInsets.all(20),
+                          itemCount: currentTasks.length,
+                          // 性能优化：增加缓存区域
+                          cacheExtent: 500,
+                          addRepaintBoundaries: true,
+                          addAutomaticKeepAlives: false,
+                          // 平滑滚动配置 - 使用快速响应模式
+                          config: SmoothScrollConfig.fast,
+                          itemBuilder: (context, index) {
+                            final task = currentTasks[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: RepaintBoundary(
+                                child: _CompletedTaskCard(
+                                  key: ValueKey(task.id),
+                                  task: task,
+                                ),
                               ),
-                            ),
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
               ),
             ],
@@ -343,19 +349,19 @@ class _CompletedListState extends State<CompletedList> {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-          width: 1,
-        ),
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderDefault),
       ),
       child: Row(
         children: [
-          Icon(CustomIcons.FluentIcons.searchIcon,
-              size: 14, color: AppTheme.accentLight),
+          Icon(
+            CustomIcons.FluentIcons.searchIcon,
+            size: 14,
+            color: AppTheme.textTertiary,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: TextBox(
@@ -371,18 +377,20 @@ class _CompletedListState extends State<CompletedList> {
             ),
           ),
           if (_searchQuery.isNotEmpty)
-            IconButton(
-              icon: Icon(CustomIcons.FluentIcons.clear, size: 12),
+            FluentIconButton(
+              icon: CustomIcons.FluentIcons.clear,
+              size: 28,
+              iconSize: 12,
               onPressed: () {
                 _searchController.clear();
                 setState(() => _searchQuery = '');
               },
-              style: ButtonStyle(
-                padding: WidgetStateProperty.all(const EdgeInsets.all(6)),
-              ),
             ),
-          IconButton(
-            icon: Icon(CustomIcons.FluentIcons.chrome_close, size: 14),
+          const SizedBox(width: 2),
+          FluentIconButton(
+            icon: CustomIcons.FluentIcons.chrome_close,
+            size: 28,
+            iconSize: 13,
             onPressed: () {
               _searchController.clear();
               setState(() {
@@ -390,9 +398,6 @@ class _CompletedListState extends State<CompletedList> {
                 _searchQuery = '';
               });
             },
-            style: ButtonStyle(
-              padding: WidgetStateProperty.all(const EdgeInsets.all(6)),
-            ),
           ),
         ],
       ),
@@ -501,45 +506,18 @@ class _CompletedListState extends State<CompletedList> {
               ),
               const SizedBox(width: 8),
               // 搜索按钮
-              IconButton(
-                icon: Icon(
-                  _showSearch
-                      ? CustomIcons.FluentIcons.searchIcon
-                      : CustomIcons.FluentIcons.searchIcon,
-                  size: 14,
-                  color: _showSearch
-                      ? AppTheme.accentLight
-                      : AppTheme.textSecondary,
-                ),
+              FluentIconButton(
+                icon: CustomIcons.FluentIcons.searchIcon,
+                tooltip: t.completedSearchPlaceholder,
+                selected: _showSearch,
                 onPressed: () => setState(() => _showSearch = !_showSearch),
-                style: ButtonStyle(
-                  padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-                  backgroundColor: WidgetStateProperty.resolveWith((states) {
-                    if (_showSearch) {
-                      return AppTheme.accentPrimary.withValues(alpha: 0.1);
-                    }
-                    if (states.isHovered) {
-                      return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                    }
-                    return Colors.transparent;
-                  }),
-                ),
               ),
               const SizedBox(width: 4),
               // 新建自定义分类按钮
-              IconButton(
-                icon: Icon(CustomIcons.FluentIcons.add,
-                    size: 14, color: AppTheme.textSecondary),
+              FluentIconButton(
+                icon: CustomIcons.FluentIcons.add,
+                tooltip: t.completedCreateCategoryTitle,
                 onPressed: _showCreateCategoryDialog,
-                style: ButtonStyle(
-                  padding: WidgetStateProperty.all(const EdgeInsets.all(8)),
-                  backgroundColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.isHovered) {
-                      return AppTheme.bgLayer2.withValues(alpha: 0.5);
-                    }
-                    return Colors.transparent;
-                  }),
-                ),
               ),
             ],
           ),
@@ -653,27 +631,24 @@ class _CompletedListState extends State<CompletedList> {
       margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-          width: 1,
-        ),
+        color: AppTheme.surfaceCard,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderDefault),
       ),
       child: Row(
         children: [
           Icon(
             CustomIcons.FluentIcons.list,
             size: 14,
-            color: AppTheme.accentLight,
+            color: AppTheme.textTertiary,
           ),
           const SizedBox(width: 8),
           Text(
             t.completedBatchActionsLabel(tasks.length),
-            style: FluentTheme.of(context).typography.caption?.copyWith(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
-                ),
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+            ),
           ),
           const Spacer(),
           Button(
@@ -896,9 +871,10 @@ class _CompletedListState extends State<CompletedList> {
     );
   }
 
+  /// WinUI 3 页头：扁平图标磁贴 + Subtitle 标题 + 中性计数徽标 + 右侧命令
   Widget _buildHeader(BuildContext context, int count) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: AppTheme.borderSubtle),
@@ -907,44 +883,34 @@ class _CompletedListState extends State<CompletedList> {
       child: Row(
         children: [
           Container(
-            width: 28,
-            height: 28,
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: AppTheme.statusSuccess.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(6),
+              color: AppTheme.statusSuccess.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
             ),
             child: Icon(
               CustomIcons.FluentIcons.completed,
-              size: 14,
+              size: 16,
               color: AppTheme.statusSuccess,
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Text(
             t.completedHeaderTitle,
-            style: FluentTheme.of(context).typography.body?.copyWith(
+            style: FluentTheme.of(context).typography.bodyLarge?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textPrimary,
                 ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: AppTheme.statusSuccess.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-            ),
-            child: Text(
-              '$count',
-              style: FluentTheme.of(context).typography.caption?.copyWith(
-                    color: AppTheme.statusSuccess,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 12,
-                  ),
-            ),
-          ),
+          const SizedBox(width: 10),
+          FluentChip(label: '$count', fontSize: 12),
           const Spacer(),
-          Button(
+          FluentSubtleButton(
+            icon: CustomIcons.FluentIcons.folder_open,
+            label: t.completedOpenFolderButton,
+            filled: true,
             onPressed: () async {
               final folder =
                   Directory("${Platform.environment['USERPROFILE']}\\Downloads")
@@ -952,15 +918,6 @@ class _CompletedListState extends State<CompletedList> {
               final target = folder.replaceAll('/', '\\');
               await Process.run('explorer', [target]);
             },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(CustomIcons.FluentIcons.folder_open, size: 12),
-                SizedBox(width: 6),
-                Text(t.completedOpenFolderButton,
-                    style: const TextStyle(fontSize: 12)),
-              ],
-            ),
           ),
         ],
       ),
@@ -1000,83 +957,48 @@ class _CompletedListState extends State<CompletedList> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
+    // 与下载页一致的 WinUI 入场：淡入 + 8px 上移，无弹跳/发光
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 1200),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.elasticOut,
-            builder: (context, value, child) {
-              return Transform.scale(
-                scale: value,
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.statusSuccess
-                            .withValues(alpha: 0.26 * value),
-                        blurRadius: 60 * value,
-                        spreadRadius: 10 * value,
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    CustomIcons.FluentIcons.completed,
-                    size: 40,
-                    color: AppTheme.statusSuccess.withValues(alpha: 0.7),
-                  ),
-                ),
-              );
-            },
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: 1),
+        duration: AppTheme.motionNormal,
+        curve: AppTheme.motionStandard,
+        builder: (context, value, child) => Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, 8 * (1 - value)),
+            child: child,
           ),
-          const SizedBox(height: 24),
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 800),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(
-                  opacity: value,
-                  child: Text(
-                    t.completedEmptyTitle,
-                    style:
-                        FluentTheme.of(context).typography.subtitle?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary,
-                            ),
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-          TweenAnimationBuilder<double>(
-            duration: const Duration(milliseconds: 1000),
-            tween: Tween(begin: 0.0, end: 1.0),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(0, 20 * (1 - value)),
-                child: Opacity(
-                  opacity: value,
-                  child: Text(
-                    t.completedEmptySubtitle,
-                    style: FluentTheme.of(context).typography.body?.copyWith(
-                          color: AppTheme.textTertiary,
-                        ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CustomIcons.FluentIcons.completed,
+              size: 40,
+              color: AppTheme.textDisabled,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              t.completedEmptyTitle,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              t.completedEmptySubtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: AppTheme.textTertiary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1099,17 +1021,17 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
   Widget build(BuildContext context) {
     final downloadService = context.read<IntegratedDownloadService>();
 
+    // 与下载任务卡片统一：WinUI 卡面令牌 + 中性描边，hover 仅做 subtle 填充变化
     return AnimatedCard(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      backgroundColor:
-          AppTheme.cardBackground(darkAlpha: 0.78, lightAlpha: 0.85),
-      hoverColor:
-          AppTheme.cardHoverBackground(darkAlpha: 0.88, lightAlpha: 0.95),
-      borderColor: AppTheme.borderSubtle,
-      hoverBorderColor: AppTheme.statusSuccess.withValues(alpha: 0.4),
-      borderRadius: AppTheme.radiusLg,
-      enableGlowAnimation: true,
+      backgroundColor: AppTheme.surfaceCard,
+      hoverColor: AppTheme.surfaceCardHover,
+      borderColor: AppTheme.borderDefault,
+      hoverBorderColor: AppTheme.borderStrong,
+      borderRadius: AppTheme.radiusSm,
+      enableScaleAnimation: false,
+      enableGlowAnimation: false,
       child: Column(
         children: [
           Row(
@@ -1122,7 +1044,7 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
             ],
           ),
           AnimatedCrossFade(
-            firstChild: const SizedBox.shrink(),
+            firstChild: const SizedBox(width: double.infinity, height: 0),
             secondChild: Padding(
               padding: const EdgeInsets.only(top: 16),
               child: _buildStatistics(),
@@ -1130,8 +1052,10 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
             crossFadeState: _isExpanded
                 ? CrossFadeState.showSecond
                 : CrossFadeState.showFirst,
-            duration: const Duration(milliseconds: 300),
-            sizeCurve: Curves.easeOutCubic,
+            duration: AppTheme.motionNormal,
+            sizeCurve: AppTheme.motionStandard,
+            firstCurve: AppTheme.motionAccelerate,
+            secondCurve: AppTheme.motionStandard,
           ),
         ],
       ),
@@ -1139,14 +1063,14 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
   }
 
   Widget _buildStatistics() {
+    // WinUI Expander 展开区：独立的 subtle 底色 + 描边，与卡面区分层级
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppTheme.bgLayer1.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.5),
-        ),
+        color: AppTheme.subtleFillHover,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        border: Border.all(color: AppTheme.borderSubtle),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1321,75 +1245,78 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
   Widget _buildCompactUrlRow(String url) {
     final displayUrl = url.length > 60 ? '${url.substring(0, 60)}...' : url;
 
-    return GestureDetector(
-      onTap: _copyUrlToClipboard,
-      child: Container(
+    // hover/press 高亮铺满这一整块，点击复制链接
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FluentInteractiveSurface(
+        onPressed: _copyUrlToClipboard,
+        tooltip: t.downloadCopyTooltip,
+        colors: FluentInteractionColors(
+          rest: AppTheme.subtleFillHover,
+          hovered: AppTheme.surfaceCardHover,
+          pressed: AppTheme.subtleFillPressed,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: AppTheme.bgLayer1.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              CustomIcons.FluentIcons.link,
-              size: 10,
-              color: AppTheme.textTertiary,
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                displayUrl,
-                style: FluentTheme.of(context).typography.caption?.copyWith(
-                      color: AppTheme.textTertiary,
-                      fontSize: 10,
-                    ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+        builder: (context, states) {
+          final color = states.isHovered || states.isPressed
+              ? AppTheme.textSecondary
+              : AppTheme.textTertiary;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(CustomIcons.FluentIcons.link, size: 10, color: color),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  displayUrl,
+                  style: TextStyle(color: color, fontSize: 11),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
 
+  /// WinUI 3 命令区：主操作用带文字的按钮，其余用 32×32 subtle 图标按钮，间距 4。
   Widget _buildActions(IntegratedDownloadService service) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _ActionButton(
+        FluentSubtleButton(
           icon: CustomIcons.FluentIcons.play,
           label: t.completedActionRun,
-          color: AppTheme.accentPrimary,
+          accentColor: AppTheme.accentPrimary,
+          filled: true,
           onPressed: () => _runFile(widget.task.filePath),
         ),
         const SizedBox(width: 6),
-        _ActionButton(
+        FluentSubtleButton(
           icon: CustomIcons.FluentIcons.folder_open,
           label: t.completedActionLocation,
-          color: AppTheme.textSecondary,
           onPressed: () => _openFileLocation(widget.task.filePath),
         ),
-        const SizedBox(width: 6),
-        _IconActionButton(
+        const SizedBox(width: 4),
+        FluentIconButton(
           icon: CustomIcons.FluentIcons.tag,
-          color: AppTheme.accentLight,
+          tooltip: t.tagActionLabel,
+          accentColor: AppTheme.accentLight,
           onPressed: _editTags,
         ),
-        const SizedBox(width: 6),
-        _IconActionButton(
-          icon: _isExpanded
-              ? CustomIcons.FluentIcons.chevron_up
-              : CustomIcons.FluentIcons.chevron_down,
-          color: AppTheme.textSecondary,
+        const SizedBox(width: 4),
+        FluentExpanderChevron(
+          expanded: _isExpanded,
           onPressed: () => setState(() => _isExpanded = !_isExpanded),
         ),
-        const SizedBox(width: 6),
-        _IconActionButton(
+        const SizedBox(width: 4),
+        FluentIconButton(
           icon: CustomIcons.FluentIcons.delete,
-          color: AppTheme.statusError,
+          tooltip: t.downloadActionDelete,
+          accentColor: AppTheme.statusError,
+          tinted: true,
           onPressed: () => _confirmDelete(service),
         ),
       ],
@@ -1628,72 +1555,8 @@ class _CompletedTaskCardState extends State<_CompletedTaskCard> {
 }
 
 /// 带文字的操作按钮
-class _ActionButton extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onPressed;
-
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onPressed,
-  });
-
-  @override
-  State<_ActionButton> createState() => _ActionButtonState();
-}
-
-class _ActionButtonState extends State<_ActionButton> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: _isHovered
-                ? widget.color.withValues(alpha: 0.15)
-                : AppTheme.bgLayer2,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: _isHovered
-                  ? widget.color.withValues(alpha: 0.3)
-                  : AppTheme.borderSubtle,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                size: 12,
-                color: _isHovered ? widget.color : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _isHovered ? widget.color : AppTheme.textSecondary,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 统计项组件
+/// 统计项组件：WinUI 3 subtle 信息磁贴。
+/// 去掉了固定 110px 宽度，改为按内容自适应并设最小宽度，窄窗口下不会硬撑换行。
 class _StatItem extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1709,110 +1572,145 @@ class _StatItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 110,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppTheme.bgLayer2.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-        border: Border.all(
-          color: AppTheme.borderSubtle.withValues(alpha: 0.3),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 104, maxWidth: 180),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.subtleFillHover,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                icon,
-                size: 11,
-                color: color,
-              ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.textTertiary,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 11, color: color),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textTertiary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: AppTheme.textPrimary,
+              ],
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// 纯图标操作按钮
-class _IconActionButton extends StatefulWidget {
+/// WinUI 3 `SelectorBar` 条目内容：图标 + 文案 + 计数徽标 + 底部 accent 指示条。
+///
+/// 选中态不再用彩色描边方框（那是 WinUI 之前的 Pivot 观感），而是：
+/// subtle 填充 + BodyStrong 文本 + 底部 3px accent 指示条，指示条宽度带动画。
+class _SelectorBarContent extends StatelessWidget {
   final IconData icon;
-  final Color color;
-  final VoidCallback onPressed;
+  final String label;
+  final int count;
+  final bool isSelected;
+  final Set<WidgetState> states;
+  final Widget? trailing;
 
-  const _IconActionButton({
+  const _SelectorBarContent({
     required this.icon,
-    required this.color,
-    required this.onPressed,
+    required this.label,
+    required this.count,
+    required this.isSelected,
+    required this.states,
+    this.trailing,
   });
 
   @override
-  State<_IconActionButton> createState() => _IconActionButtonState();
-}
-
-class _IconActionButtonState extends State<_IconActionButton> {
-  bool _isHovered = false;
-
-  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: _isHovered
-                ? widget.color.withValues(alpha: 0.15)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: _isHovered
-                  ? widget.color.withValues(alpha: 0.3)
-                  : Colors.transparent,
+    final accent = AppTheme.isDarkContext(context)
+        ? AppTheme.accentLight
+        : AppTheme.accentPrimary;
+    final foreground = isSelected
+        ? AppTheme.textPrimary
+        : (states.isHovered || states.isPressed)
+            ? AppTheme.textPrimary
+            : AppTheme.textSecondary;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: isSelected ? accent : foreground),
+            const SizedBox(width: 7),
+            AnimatedDefaultTextStyle(
+              duration: AppTheme.motionFast,
+              curve: AppTheme.motionStandard,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                color: foreground,
+              ),
+              child: Text(label),
             ),
-          ),
-          child: Icon(
-            widget.icon,
-            size: 12,
-            color: _isHovered ? widget.color : AppTheme.textTertiary,
+            const SizedBox(width: 6),
+            AnimatedContainer(
+              duration: AppTheme.motionFast,
+              curve: AppTheme.motionStandard,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.accentPrimary.withValues(alpha: 0.18)
+                    : AppTheme.subtleFillHover,
+                borderRadius: BorderRadius.circular(AppTheme.radiusRound),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? accent : AppTheme.textTertiary,
+                ),
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
+        ),
+        const SizedBox(height: 5),
+        // WinUI SelectorBar 指示条
+        AnimatedContainer(
+          duration: AppTheme.motionNormal,
+          curve: AppTheme.motionStandard,
+          height: 3,
+          width: isSelected ? 18 : 0,
+          decoration: BoxDecoration(
+            color: accent,
+            borderRadius: BorderRadius.circular(2),
           ),
         ),
-      ),
+      ],
     );
   }
 }
 
-/// Tab 按钮组件
-class _TabButton extends StatefulWidget {
+/// Tab 按钮组件（WinUI 3 SelectorBar 风格）
+class _TabButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final int count;
@@ -1828,112 +1726,17 @@ class _TabButton extends StatefulWidget {
   });
 
   @override
-  State<_TabButton> createState() => _TabButtonState();
-}
-
-class _TabButtonState extends State<_TabButton>
-    with SingleTickerProviderStateMixin {
-  bool _isHovered = false;
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-
-    if (widget.isSelected) {
-      _controller.value = 1.0;
-    }
-  }
-
-  @override
-  void didUpdateWidget(_TabButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isSelected != oldWidget.isSelected) {
-      if (widget.isSelected) {
-        _controller.forward();
-      } else {
-        _controller.reverse();
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? AppTheme.accentPrimary.withValues(alpha: 0.15)
-                : (_isHovered ? AppTheme.bgLayer2 : Colors.transparent),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: widget.isSelected
-                  ? AppTheme.accentPrimary.withValues(alpha: 0.4)
-                  : (_isHovered ? AppTheme.borderSubtle : Colors.transparent),
-              width: 1.5,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                size: 12,
-                color: widget.isSelected
-                    ? AppTheme.accentPrimary
-                    : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight:
-                      widget.isSelected ? FontWeight.w500 : FontWeight.w400,
-                  color: widget.isSelected
-                      ? AppTheme.accentPrimary
-                      : AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: widget.isSelected
-                      ? AppTheme.accentPrimary.withValues(alpha: 0.2)
-                      : AppTheme.bgLayer2,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                ),
-                child: Text(
-                  '${widget.count}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: widget.isSelected
-                        ? AppTheme.accentPrimary
-                        : AppTheme.textTertiary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+    return FluentInteractiveSurface(
+      onPressed: onTap,
+      colors: FluentInteractionColors.subtle(),
+      padding: const EdgeInsets.fromLTRB(10, 7, 10, 3),
+      builder: (context, states) => _SelectorBarContent(
+        icon: icon,
+        label: label,
+        count: count,
+        isSelected: isSelected,
+        states: states,
       ),
     );
   }
@@ -1961,120 +1764,35 @@ class _CustomTabButton extends StatefulWidget {
   State<_CustomTabButton> createState() => _CustomTabButtonState();
 }
 
-class _CustomTabButtonState extends State<_CustomTabButton>
-    with SingleTickerProviderStateMixin {
-  bool _isHovered = false;
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-
-    if (widget.isSelected) {
-      _controller.value = 1.0;
-    }
-  }
-
-  @override
-  void didUpdateWidget(_CustomTabButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isSelected != oldWidget.isSelected) {
-      if (widget.isSelected) {
-        _controller.forward();
-      } else {
-        _controller.reverse();
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
+class _CustomTabButtonState extends State<_CustomTabButton> {
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? AppTheme.accentPrimary.withValues(alpha: 0.15)
-                : (_isHovered ? AppTheme.bgLayer2 : Colors.transparent),
-            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-            border: Border.all(
-              color: widget.isSelected
-                  ? AppTheme.accentPrimary.withValues(alpha: 0.4)
-                  : (_isHovered ? AppTheme.borderSubtle : Colors.transparent),
-              width: 1.5,
+    return FluentInteractiveSurface(
+      onPressed: widget.onTap,
+      colors: FluentInteractionColors.subtle(),
+      padding: const EdgeInsets.fromLTRB(10, 7, 6, 3),
+      builder: (context, states) => _SelectorBarContent(
+        icon: widget.icon,
+        label: widget.label,
+        count: widget.count,
+        isSelected: widget.isSelected,
+        states: states,
+        // 删除按钮只在悬停时淡入，但始终占位，避免整条 Tab 抖动
+        trailing: AnimatedOpacity(
+          opacity: states.isHovered ? 1 : 0,
+          duration: AppTheme.motionFast,
+          curve: AppTheme.motionStandard,
+          child: IgnorePointer(
+            ignoring: !states.isHovered,
+            child: FluentIconButton(
+              icon: CustomIcons.FluentIcons.chrome_close,
+              size: 20,
+              iconSize: 9,
+              restColor: AppTheme.textTertiary,
+              accentColor: AppTheme.statusError,
+              tinted: true,
+              onPressed: widget.onDelete,
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                size: 12,
-                color: widget.isSelected
-                    ? AppTheme.accentPrimary
-                    : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                widget.label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight:
-                      widget.isSelected ? FontWeight.w500 : FontWeight.w400,
-                  color: widget.isSelected
-                      ? AppTheme.accentPrimary
-                      : AppTheme.textSecondary,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                  color: widget.isSelected
-                      ? AppTheme.accentPrimary.withValues(alpha: 0.2)
-                      : AppTheme.bgLayer2,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusRound),
-                ),
-                child: Text(
-                  '${widget.count}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: widget.isSelected
-                        ? AppTheme.accentPrimary
-                        : AppTheme.textTertiary,
-                  ),
-                ),
-              ),
-              if (_isHovered) ...[
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () {
-                    widget.onDelete();
-                  },
-                  child: Icon(
-                    CustomIcons.FluentIcons.chrome_close,
-                    size: 10,
-                    color: AppTheme.statusError,
-                  ),
-                ),
-              ],
-            ],
           ),
         ),
       ),

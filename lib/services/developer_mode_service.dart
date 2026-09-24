@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'plugin_diagnostic_logger.dart';
+
 class DeveloperModeService extends ChangeNotifier {
   static final DeveloperModeService _instance =
       DeveloperModeService._internal();
@@ -38,11 +40,15 @@ class DeveloperModeService extends ChangeNotifier {
         prefs.getBool('show_performance_monitor_page') ?? false;
     _showConnectionDebugPage =
         prefs.getBool('show_connection_debug_page') ?? false;
+    // 逐次插件调用的诊断日志只在开发者模式下记录：轮询期间它的写入量
+    // 足以让界面掉帧。
+    PluginDiagnosticLogger().verbose = _developerMode;
     notifyListeners();
   }
 
   Future<void> setDeveloperMode(bool value) async {
     _developerMode = value;
+    PluginDiagnosticLogger().verbose = value;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('developer_mode', value);
 
